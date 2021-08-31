@@ -63,19 +63,15 @@ class PYQGSubgridDataset(object):
             sampling_delay=sampling_delay
         )
 
-    @property
-    def save_dir(self):
-        return os.path.join(self.data_dir, md5_hash(self.config))
-
     def path(self, f):
-        return os.path.join(self.save_dir, f)
+        return os.path.join(self.data_dir, f)
 
     @cachedproperty
     def dataset(self):
-        if not os.path.exists(self.save_dir):
+        if not os.path.exists(self.data_dir):
             self._generate_dataset()
         data = {}
-        for f in os.listdir(self.save_dir):
+        for f in os.listdir(self.data_dir):
             parts = f.split('.')
             if len(parts) == 2:
                 name, ext = parts
@@ -122,7 +118,7 @@ class PYQGSubgridDataset(object):
         coarse_data = layers.downscaled(config.scale_factor).dataset
         forcing_data = layers.subgrid_forcings(config.scale_factor)
 
-        os.system(f"mkdir -p {self.save_dir}")
+        os.system(f"mkdir -p {self.data_dir}")
         coarse_data.to_netcdf(self.path('coarse_data.nc'))
         forcing_data.to_netcdf(self.path('forcing_data.nc'))
         for key, val in metadata._asdict().items():
@@ -134,7 +130,7 @@ class PYQGSubgridDataset(object):
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data_dir', type=str, default='.')
+    parser.add_argument('--data_dir', type=str)
     parser.add_argument('--n_runs', type=int, default=1)
     parser.add_argument('--sampling_freq', type=int, default=1)
     parser.add_argument('--sampling_mode', type=str, default='uniform')
@@ -149,5 +145,7 @@ if __name__ == '__main__':
         kwargs[key.replace('--', '')] = float(val)
 
     ds = PYQGSubgridDataset(**kwargs)
-    print(ds.dataset)
-    print(ds.data_dir)
+    print(f"Generating {ds.data_dir}")
+    print(kwargs)
+    ds._generate_dataset()
+    print("Done!")
