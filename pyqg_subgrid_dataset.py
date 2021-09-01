@@ -141,10 +141,12 @@ class PYQGSubgridDataset(object):
         hi_res_data = xr.concat(datasets, 'batch')
         layers = sg.FluidLayer(hi_res_data)
 
+        hires_data = layers.dataset
         coarse_data = layers.downscaled(config.scale_factor).dataset
         forcing_data = layers.subgrid_forcings(config.scale_factor)
 
         os.system(f"mkdir -p {self.data_dir}")
+        hires_data.to_netcdf(self.path('hires_data.nc'))
         coarse_data.to_netcdf(self.path('coarse_data.nc'))
         forcing_data.to_netcdf(self.path('forcing_data.nc'))
         for key, val in metadata._asdict().items():
