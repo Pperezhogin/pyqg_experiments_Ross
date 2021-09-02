@@ -5,13 +5,15 @@ import xarray as xr
 import torch
 import os
 import csv
-from pyqg_subgrid_dataset import PYQGSubgridDataset
-from models import *
 from sklearn.preprocessing import StandardScaler
 
+from pyqg_subgrid_dataset import PYQGSubgridDataset
+from models import *
+
+pyqg_dir = '/scratch/zanna/data/pyqg'
 datasets = [
-    PYQGSubgridDataset(ds)
-    for ds in os.listdir('/scratch/zanna/data/pyqg')
+    PYQGSubgridDataset(os.path.join(pyqg_dir, ds))
+    for ds in os.listdir(pyqg_dir)
 ]
 
 results = open('basic_cnn_results.csv', 'w')
@@ -31,7 +33,6 @@ for ds in datasets:
     model.set_scales(X_scale, Y_scale)
     model.fit(X_train, Y_train)
     model.save(ds.path('basic_cnn'))
-
     for ds2 in datasets:
         _, X_test2, __, Y_test2 = ds2.train_test_split()
         mse = model.mse(X_test2, Y_test2)
