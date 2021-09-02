@@ -81,12 +81,21 @@ class PYQGSubgridDataset(object):
     def to_np(self, d):
         return d.data.astype(np.float32).reshape(-1, self.resolution**2)
 
+    @cachedproperty
+    def persistent_order(self):
+        path = os.path.join(self.data_dir, 'order.npy')
+        if not os.path.exists(path):
+            N = len(self.dataset.time_idxs)
+            order = np.arange(N)
+            self.random_state.shuffle(order)
+            np.save(path, order)
+        return np.load(path)
+
     def train_test_split(self, inputs='potential_vorticity',
             targets='potential_vorticity', test_frac=0.25):
         x = self.to_np(self.dataset.coarse_data[inputs])
         y = self.to_np(self.dataset.forcing_data[targets])
-        order = np.arange(len(x))
-        self.random_state.shuffle(order)
+        order = self.persistent_order
         split_at = int(len(x)*test_frac)
         train = order[split_at:]
         test = order[:split_at]
