@@ -66,6 +66,32 @@ class PYQGSubgridDataset(object):
     def path(self, f):
         return os.path.join(self.data_dir, f)
 
+    @property
+    def name(self):
+        return self.data_dir.split('/')[-1]
+
+    @cachedproperty
+    def random_state(self):
+        return np.random.RandomState(seed=0)
+
+    @property
+    def resolution(self):
+        return self.dataset.coarse_data.potential_vorticity.shape[-1]
+
+    def to_np(self, d):
+        return d.data.astype(np.float32).reshape(-1, self.resolution**2)
+
+    def train_test_split(self, inputs='potential_vorticity',
+            targets='potential_vorticity', test_frac=0.25):
+        x = self.to_np(self.dataset.coarse_data[inputs])
+        y = self.to_np(self.dataset.forcing_data[targets])
+        order = np.arange(len(x))
+        self.random_state.shuffle(order)
+        split_at = int(len(x)*test_frac)
+        train = order[split_at:]
+        test = order[:split_at]
+        return x[train], x[test], y[train], y[test]
+
     @cachedproperty
     def dataset(self):
         if not os.path.exists(self.data_dir):
