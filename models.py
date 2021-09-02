@@ -42,7 +42,8 @@ class ScaledModel(object):
         assert isinstance(inputs, np.ndarray)
         scaled = self.input_scale.transform(inputs)
         tensor = torch.as_tensor(scaled)
-        output = self.forward(tensor)
+        with torch.no_grad():
+            output = self.forward(tensor).numpy()
         return self.output_scale.inverse_transform(output)
 
     def mse(self, inputs, targets):
