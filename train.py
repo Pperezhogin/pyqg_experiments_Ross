@@ -16,22 +16,23 @@ datasets = [
     for ds in os.listdir(pyqg_dir)
 ]
 
-results = open('basic_cnn_results.csv', 'w')
+with open('basic_cnn_results.csv', 'w') as f:
+    f.write("Train,Test,MSE\n")
 
 def write_result(s):
     print(s)
-    results.write(s)
-
-write_result("Train,Test,MSE")
+    with open('basic_cnn_results.csv', 'a+') as f:
+        f.write(s + "\n")
 
 for ds in datasets:
+    print(ds.name)
     X_train, X_test, Y_train, Y_test = ds.train_test_split()
     X_scale = StandardScaler().fit(X_train)
     Y_scale = StandardScaler().fit(Y_train)
     shape = (1, ds.resolution, ds.resolution)
     model = BasicCNN(shape, shape)
     model.set_scales(X_scale, Y_scale)
-    model.fit(X_train, Y_train)
+    model.fit(X_train, Y_train, num_epochs=25)
     model.save(ds.path('basic_cnn'))
     for ds2 in datasets:
         _, X_test2, __, Y_test2 = ds2.train_test_split()
