@@ -5,15 +5,16 @@ import pickle
 import numpy as np
 from collections import OrderedDict
 
-def minibatch(inputs, targets, batch_size=64):
+def minibatch(inputs, targets, batch_size=64, as_tensor=True):
     assert len(inputs) == len(targets)
     order = np.arange(len(inputs))
     np.random.shuffle(order)
     steps = len(inputs) // batch_size
+    xform = torch.as_tensor if as_tensor else lambda x: x
     for step in range(steps):
         idx = order[step*batch_size:(step+1)*batch_size]
-        x = torch.as_tensor(inputs[idx])
-        y = torch.as_tensor(targets[idx])
+        x = xform(inputs[idx])
+        y = xform(targets[idx])
         yield x, y
 
 def train(net, inputs, targets, num_epochs=50, batch_size=64, learning_rate=0.001):
@@ -38,21 +39,19 @@ class ScaledModel(object):
         self.output_scale = output_scale
 
     def predict(self, inputs):
-        if isinstance(inputs, np.ndarray):
-            return self.forward_scaled(torch.as_tensor(inputs)).numpy()
-        else:
-            return self.forward_scaled(inputs)
+        assert isinstance(inputs, np.ndarray)
+        scaled = self.input_scale.transform(inputs)
+        tensor = torch.as_tensor(scaled)
+        output = self.forward(tensor)
+        return self.output_scale.inverse_transform(output)
 
-    def forward_scaled(self, inputs):
-        return self.output_scale.transform(
-                self.forward(
-                    self.input_scale.transform(inputs)))
-
-    def mse(self, inputs, targets, batch_size=64):
+    def mse(self, inputs, targets):
         mse = nn.MSELoss()
         mses = []
-        for x, y in minibatch(inputs, targets, batch_size=batch_size):
-            mses.append(mse(self.predict(x), y).item())
+        for x, y in minibatch(inputs, targets, as_tensor=False):
+            yhat = self.predict(x)
+            errs = np.sum((y-yhat)**2, axis=1)
+            mses.append(errs.mean())
         return np.mean(mses)
 
     def fit(self, inputs, targets, **kw):
