@@ -9,7 +9,7 @@ def minibatch(inputs, targets, batch_size=64, as_tensor=True):
     assert len(inputs) == len(targets)
     order = np.arange(len(inputs))
     np.random.shuffle(order)
-    steps = len(inputs) // batch_size
+    steps = int(np.ceil(len(inputs) / batch_size))
     xform = torch.as_tensor if as_tensor else lambda x: x
     for step in range(steps):
         idx = order[step*batch_size:(step+1)*batch_size]
