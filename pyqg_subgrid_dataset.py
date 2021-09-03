@@ -119,6 +119,21 @@ class PYQGSubgridDataset(object):
                         data[name] = json.load(ff)
         return Struct(**data)
 
+    def run_with_model(self, net):
+        def q_parameterization(run):
+            print("CALLING MODEL")
+            q = run.q.reshape(-1,res*res)
+            dq = net.predict(q).reshape(run.q.shape)
+            print(q.mean())
+            print(dq.mean())
+            return dq
+        res = self.resolution
+        kws = self.config['pyqg_kwargs']
+        kws.update(nx=res, q_parameterization=q_parameterization)
+        run = pyqg.QGModel(**kws)
+        run.run()
+        return run
+
     def _generate_dataset(self):
         datasets = []
         metadata = Struct(run_idxs=[], time_idxs=[], time_vals=[], layer_idxs=[])
