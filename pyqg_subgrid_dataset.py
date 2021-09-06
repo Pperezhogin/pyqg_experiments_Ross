@@ -50,14 +50,14 @@ SAMPLERS = { 'uniform': UniformSampler, 'exponential': ExponentialSampler }
 
 class PYQGSubgridDataset(object):
     def __init__(self, data_dir='./pyqg_datasets', n_runs=5, sampling_freq=100, sampling_mode='exponential', sampling_delay=0,
-            scale_factor=2,
+            scale_factors=[2],
             **pyqg_kwargs):
         self.data_dir = data_dir
         self.sampler = lambda: SAMPLERS[sampling_mode](sampling_freq, sampling_delay)
         self.config = dict(
             n_runs=n_runs,
-            scale_factor=scale_factor,
             pyqg_kwargs=pyqg_kwargs,
+            scale_factors=scale_factors,
             sampling_freq=sampling_freq,
             sampling_mode=sampling_mode,
             sampling_delay=sampling_delay
@@ -135,6 +135,11 @@ class PYQGSubgridDataset(object):
         return run
 
     def _generate_dataset(self):
+        os.system(f"mkdir -p {self.data_dir}")
+
+        with open(self.path('config.json'), 'w') as f:
+            f.write(json.dumps(self.config))
+
         datasets = []
         metadata = Struct(run_idxs=[], time_idxs=[], time_vals=[], layer_idxs=[])
         config = Struct(**self.config)
@@ -162,21 +167,20 @@ class PYQGSubgridDataset(object):
 
                 t += 1
 
+        for key, val in metadata._asdict().items():
+            np.save(self.path(key+'.npy'), val)
+
         hi_res_data = xr.concat(datasets, 'batch')
         layers = sg.FluidLayer(hi_res_data, periodic=True)
 
         hires_data = layers.dataset
-        coarse_data = layers.downscaled(config.scale_factor).dataset
-        forcing_data = layers.subgrid_forcings(config.scale_factor)
-
-        os.system(f"mkdir -p {self.data_dir}")
         hires_data.to_netcdf(self.path('hires_data.nc'))
-        coarse_data.to_netcdf(self.path('coarse_data.nc'))
-        forcing_data.to_netcdf(self.path('forcing_data.nc'))
-        for key, val in metadata._asdict().items():
-            np.save(self.path(key+'.npy'), val)
-        with open(self.path('config.json'), 'w') as f:
-            f.write(json.dumps(self.config))
+
+        for sf in config.scale_factors:
+            coarse_data = layers.downscaled(sf).dataset
+            forcing_data = layers.subgrid_forcings(sf)
+            coarse_data.to_netcdf(self.path(f"coarse_data{sf}.nc"))
+            forcing_data.to_netcdf(self.path("forcing_data{sf}.nc"))
 
 
 if __name__ == '__main__':
@@ -184,7 +188,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_dir', type=str)
     parser.add_argument('--n_runs', type=int, default=1)
-    parser.add_argument('--scale_factor', type=int, default=2)
+    parser.add_argument('--scale_factors', type=str, default='2,4')
     parser.add_argument('--sampling_freq', type=int, default=1)
     parser.add_argument('--sampling_mode', type=str, default='uniform')
     parser.add_argument('--sampling_delay', type=int, default=0)
@@ -196,6 +200,7 @@ if __name__ == '__main__':
     for param in extra:
         key, val = param.split('=')
         kwargs[key.replace('--', '')] = float(val)
+    kwargs['scale_factors'] = [int(sf) for sf in kwargs['scale_factors'].split(',')]
 
     ds = PYQGSubgridDataset(**kwargs)
     print(f"Generating {ds.data_dir}")
