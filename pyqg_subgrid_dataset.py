@@ -163,7 +163,7 @@ class PYQGSubgridDataset(object):
                 t += 1
 
         hi_res_data = xr.concat(datasets, 'batch')
-        layers = sg.FluidLayer(hi_res_data)
+        layers = sg.FluidLayer(hi_res_data, periodic=True)
 
         hires_data = layers.dataset
         coarse_data = layers.downscaled(config.scale_factor).dataset
@@ -184,6 +184,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_dir', type=str)
     parser.add_argument('--n_runs', type=int, default=1)
+    parser.add_argument('--scale_factor', type=int, default=2)
     parser.add_argument('--sampling_freq', type=int, default=1)
     parser.add_argument('--sampling_mode', type=str, default='uniform')
     parser.add_argument('--sampling_delay', type=int, default=0)
