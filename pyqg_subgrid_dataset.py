@@ -2,9 +2,35 @@ import os
 import pyqg
 import numpy as np
 import xarray as xr
+import pandas as pd
 import subgrid_forcing_tools as sg
 import json
 import gc
+
+"""
+data_dir/
+  nx128-hash1/ 
+    pyqg_params.json
+    models/
+        cnn4/
+            model
+            model_scalex
+            model_scaley
+    simulations/
+        1/
+          data.nc
+          coarse4.nc
+          forcing4.nc
+        2/
+          data.nc
+          coarse4.nc
+          forcing4.nc
+        3/
+          data.nc
+          coarse4.nc
+          forcing4.nc
+  nx32-hash1/ 
+"""
 
 class cachedproperty(object):
   def __init__(self, function):
@@ -50,7 +76,7 @@ class ExponentialSampler(object):
 SAMPLERS = { 'uniform': UniformSampler, 'exponential': ExponentialSampler }
 
 class PYQGSubgridDataset(object):
-    def __init__(self, data_dir='./pyqg_datasets', n_runs=5, sampling_freq=100, sampling_mode='exponential', sampling_delay=0,
+    def __init__(self, data_dir='./pyqg_datasets', n_runs=5, sampling_freq=1000, sampling_mode='uniform', sampling_delay=0,
             scale_factors=[2], samples_per_timestep=1,
             **pyqg_kwargs):
         self.data_dir = data_dir
@@ -146,52 +172,64 @@ class PYQGSubgridDataset(object):
         metadata = Struct(run_idxs=[], time_idxs=[], time_vals=[], layer_idxs=[])
         config = Struct(**self.config)
 
+        pyqg_dir = os.path.join(self.data_dir, 'pyqg_runs', md5_hash(config.pyqg_kwargs))
+        os.system(f"mkdir -p {pyqg_dir}")
+
+        with open(os.path.join(pyqg_dir, 'params.json'), 'w') as f:
+            f.write(json.dumps(config.pyqg_kwargs))
+
         for run_idx in range(config.n_runs):
+            gc.collect()
+
+            simulation_dir = os.path.join(pyqg_dir, str(run_idx))
+            os.system(f"mkdir -p {simulation_dir}")
+
             model = pyqg.QGModel(**config.pyqg_kwargs)
             kw = dict(dims=('x','y'), coords={'x': model.x[0], 'y': model.y[:,0]})
             sampler = self.sampler()
 
-            while model.tc < model.tmax:
+            timevals = []
+            datasets = []
+
+            zvals = pd.Index(np.array(['U', 'L']), name='z')
+
+            while model.t < model.tmax:
                 if sampler.sample_at(model.tc):
                     for _ in range(config.samples_per_timestep):
+                        layers = []
                         for layer in range(len(model.u)):
                             u = xr.DataArray(model.ufull[layer], **kw)
                             v = xr.DataArray(model.vfull[layer], **kw)
                             q = xr.DataArray(model.q[layer], **kw)
-                            datasets.append(xr.Dataset(data_vars=dict(
+                            layers.append(xr.Dataset(data_vars=dict(
                                 x_velocity=u, y_velocity=v, potential_vorticity=q)))
-                            metadata.run_idxs.append(run_idx)
-                            metadata.time_idxs.append(model.tc)
-                            metadata.time_vals.append(model.t)
-                            metadata.layer_idxs.append(layer)
+                        datasets.append(xr.concat(layers, zvals))
+                        timevals.append(model.t)
                         model._step_forward()
                 else:
                     model._step_forward()
 
-        for key, val in metadata._asdict().items():
-            np.save(self.path(key+'.npy'), val)
+            timevals = pd.Index(np.array(timevals), name='time')
+            simulation = xr.concat(datasets, timevals)
+            simulation.to_netcdf(os.path.join(simulation_dir, 'simulation.nc'))
 
-        hires_data = xr.concat(datasets, 'batch')
-        hires_data.to_netcdf(self.path('hires_data.nc'))
-        layers = sg.FluidLayer(hires_data, periodic=True)
+            layers = sg.FluidLayer(simulation, periodic=True)
 
-        for sf in config.scale_factors:
-            coarse_data = layers.downscaled(sf).dataset
-            coarse_data.to_netcdf(self.path(f"coarse_data{sf}.nc"))
-            del coarse_data
-            gc.collect()
+            for sf in config.scale_factors:
+                coarse_data = layers.downscaled(sf).dataset
+                coarse_data.to_netcdf(os.path.join(simulation_dir, f"coarse{sf}.nc"))
+                del coarse_data
 
-            forcing_data = layers.subgrid_forcings(sf)
-            forcing_data.to_netcdf(self.path("forcing_data{sf}.nc"))
-            del forcing_data
-            gc.collect()
-
+                forcing_data = layers.subgrid_forcings(sf)
+                forcing_data.to_netcdf(os.path.join(simulation_dir, f"forcings{sf}.nc"))
+                del forcing_data
 
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_dir', type=str)
     parser.add_argument('--n_runs', type=int, default=1)
+    parser.add_argument('--nx', type=int, default=64)
     parser.add_argument('--scale_factors', type=str, default='2,4')
     parser.add_argument('--sampling_freq', type=int, default=1)
     parser.add_argument('--sampling_mode', type=str, default='uniform')
