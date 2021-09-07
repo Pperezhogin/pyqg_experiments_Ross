@@ -4,6 +4,7 @@ import numpy as np
 import xarray as xr
 import subgrid_forcing_tools as sg
 import json
+import gc
 
 class cachedproperty(object):
   def __init__(self, function):
@@ -50,7 +51,7 @@ SAMPLERS = { 'uniform': UniformSampler, 'exponential': ExponentialSampler }
 
 class PYQGSubgridDataset(object):
     def __init__(self, data_dir='./pyqg_datasets', n_runs=5, sampling_freq=100, sampling_mode='exponential', sampling_delay=0,
-            scale_factors=[2],
+            scale_factors=[2], samples_per_timestep=1,
             **pyqg_kwargs):
         self.data_dir = data_dir
         self.sampler = lambda: SAMPLERS[sampling_mode](sampling_freq, sampling_delay)
@@ -60,7 +61,8 @@ class PYQGSubgridDataset(object):
             scale_factors=scale_factors,
             sampling_freq=sampling_freq,
             sampling_mode=sampling_mode,
-            sampling_delay=sampling_delay
+            sampling_delay=sampling_delay,
+            samples_per_timestep=samples_per_timestep
         )
 
     def path(self, f):
@@ -147,40 +149,42 @@ class PYQGSubgridDataset(object):
         for run_idx in range(config.n_runs):
             model = pyqg.QGModel(**config.pyqg_kwargs)
             kw = dict(dims=('x','y'), coords={'x': model.x[0], 'y': model.y[:,0]})
-            t = 0
             sampler = self.sampler()
 
-            while model.t < model.tmax:
-                model._step_forward()
-
-                if sampler.sample_at(t):
-                    for layer in range(len(model.u)):
-                        u = xr.DataArray(model.ufull[layer], **kw)
-                        v = xr.DataArray(model.vfull[layer], **kw)
-                        q = xr.DataArray(model.q[layer], **kw)
-                        datasets.append(xr.Dataset(data_vars=dict(
-                            x_velocity=u, y_velocity=v, potential_vorticity=q)))
-                        metadata.run_idxs.append(run_idx)
-                        metadata.time_idxs.append(t)
-                        metadata.time_vals.append(model.t)
-                        metadata.layer_idxs.append(layer)
-
-                t += 1
+            while model.tc < model.tmax:
+                if sampler.sample_at(model.tc):
+                    for _ in range(config.samples_per_timestep):
+                        for layer in range(len(model.u)):
+                            u = xr.DataArray(model.ufull[layer], **kw)
+                            v = xr.DataArray(model.vfull[layer], **kw)
+                            q = xr.DataArray(model.q[layer], **kw)
+                            datasets.append(xr.Dataset(data_vars=dict(
+                                x_velocity=u, y_velocity=v, potential_vorticity=q)))
+                            metadata.run_idxs.append(run_idx)
+                            metadata.time_idxs.append(model.tc)
+                            metadata.time_vals.append(model.t)
+                            metadata.layer_idxs.append(layer)
+                        model._step_forward()
+                else:
+                    model._step_forward()
 
         for key, val in metadata._asdict().items():
             np.save(self.path(key+'.npy'), val)
 
-        hi_res_data = xr.concat(datasets, 'batch')
-        layers = sg.FluidLayer(hi_res_data, periodic=True)
-
-        hires_data = layers.dataset
+        hires_data = xr.concat(datasets, 'batch')
         hires_data.to_netcdf(self.path('hires_data.nc'))
+        layers = sg.FluidLayer(hires_data, periodic=True)
 
         for sf in config.scale_factors:
             coarse_data = layers.downscaled(sf).dataset
-            forcing_data = layers.subgrid_forcings(sf)
             coarse_data.to_netcdf(self.path(f"coarse_data{sf}.nc"))
+            del coarse_data
+            gc.collect()
+
+            forcing_data = layers.subgrid_forcings(sf)
             forcing_data.to_netcdf(self.path("forcing_data{sf}.nc"))
+            del forcing_data
+            gc.collect()
 
 
 if __name__ == '__main__':
@@ -192,6 +196,7 @@ if __name__ == '__main__':
     parser.add_argument('--sampling_freq', type=int, default=1)
     parser.add_argument('--sampling_mode', type=str, default='uniform')
     parser.add_argument('--sampling_delay', type=int, default=0)
+    parser.add_argument('--samples_per_timestep', type=int, default=1)
     args, extra = parser.parse_known_args()
 
     year = 24*60*60*360.
