@@ -91,63 +91,11 @@ class PYQGSubgridDataset(object):
             samples_per_timestep=samples_per_timestep
         )
 
-    def path(self, f):
-        return os.path.join(self.data_dir, f)
-
     @property
     def name(self):
         return self.data_dir.split('/')[-1]
 
-    @cachedproperty
-    def random_state(self):
-        return np.random.RandomState(seed=0)
-
-    @property
-    def resolution(self):
-        return self.dataset.coarse_data.potential_vorticity.shape[-1]
-
-    def to_np(self, d):
-        return d.data.astype(np.float32).reshape(-1, self.resolution**2)
-
-    @cachedproperty
-    def persistent_order(self):
-        path = os.path.join(self.data_dir, 'order.npy')
-        if not os.path.exists(path):
-            N = len(self.dataset.time_idxs)
-            order = np.arange(N)
-            self.random_state.shuffle(order)
-            np.save(path, order)
-        return np.load(path)
-
-    def train_test_split(self, inputs='potential_vorticity',
-            targets='potential_vorticity', test_frac=0.25):
-        x = self.to_np(self.dataset.coarse_data[inputs])
-        y = self.to_np(self.dataset.forcing_data[targets])
-        order = self.persistent_order
-        split_at = int(len(x)*test_frac)
-        train = order[split_at:]
-        test = order[:split_at]
-        return x[train], x[test], y[train], y[test]
-
-    @cachedproperty
-    def dataset(self):
-        if not os.path.exists(self.data_dir):
-            self._generate_dataset()
-        data = {}
-        for f in os.listdir(self.data_dir):
-            parts = f.split('.')
-            if len(parts) == 2:
-                name, ext = parts
-                if ext == 'npy':
-                    data[name] = np.load(self.path(f))
-                elif ext == 'nc':
-                    data[name] = xr.open_dataset(self.path(f))
-                elif ext == 'json':
-                    with open(self.path(f), 'r') as ff:
-                        data[name] = json.load(ff)
-        return Struct(**data)
-
-    def run_with_model(self, net):
+    def run_with_model(self, net, res):
         def q_parameterization(run):
             print("CALLING MODEL")
             q = run.q.reshape(-1,res*res)
@@ -155,23 +103,27 @@ class PYQGSubgridDataset(object):
             print(q.mean())
             print(dq.mean())
             return dq
-        res = self.resolution
         kws = self.config['pyqg_kwargs']
         kws.update(nx=res, q_parameterization=q_parameterization)
         run = pyqg.QGModel(**kws)
         run.run()
         return run
 
+    @property
+    def pyqg_run_dir(self):
+        return os.path.join(self.data_dir, 'pyqg_runs', md5_hash(self.config['pyqg_kwargs']))
+
+    def load(self, key):
+        return xr.open_mfdataset(f"{self.pyqg_run_dir}/*/{key}.nc", combine="nested", concat_dim="run")
+
     def _generate_dataset(self):
-        os.system(f"mkdir -p {self.data_dir}")
-
-        with open(self.path('config.json'), 'w') as f:
-            f.write(json.dumps(self.config))
-
         config = Struct(**self.config)
+        pyqg_dir = self.pyqg_run_dir
 
-        pyqg_dir = os.path.join(self.data_dir, 'pyqg_runs', md5_hash(config.pyqg_kwargs))
         os.system(f"mkdir -p {pyqg_dir}")
+
+        with open(os.path.join(self.data_dir, 'config.json'), 'w') as f:
+            f.write(json.dumps(self.config))
 
         with open(os.path.join(pyqg_dir, 'params.json'), 'w') as f:
             f.write(json.dumps(config.pyqg_kwargs))
