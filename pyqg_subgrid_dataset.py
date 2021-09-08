@@ -168,8 +168,6 @@ class PYQGSubgridDataset(object):
         with open(self.path('config.json'), 'w') as f:
             f.write(json.dumps(self.config))
 
-        datasets = []
-        metadata = Struct(run_idxs=[], time_idxs=[], time_vals=[], layer_idxs=[])
         config = Struct(**self.config)
 
         pyqg_dir = os.path.join(self.data_dir, 'pyqg_runs', md5_hash(config.pyqg_kwargs))
@@ -182,36 +180,44 @@ class PYQGSubgridDataset(object):
             gc.collect()
 
             simulation_dir = os.path.join(pyqg_dir, str(run_idx))
-            os.system(f"mkdir -p {simulation_dir}")
 
-            model = pyqg.QGModel(**config.pyqg_kwargs)
-            kw = dict(dims=('x','y'), coords={'x': model.x[0], 'y': model.y[:,0]})
-            sampler = self.sampler()
+            print(simulation_dir)
 
-            timevals = []
-            datasets = []
+            if os.path.exists(simulation_dir):
+                print("loading")
+                simulation = xr.open_dataset(os.path.join(simulation_dir, 'simulation.nc'))
+            else:
+                print("running")
+                os.system(f"mkdir -p {simulation_dir}")
 
-            zvals = pd.Index(np.array(['U', 'L']), name='z')
+                model = pyqg.QGModel(**config.pyqg_kwargs)
+                kw = dict(dims=('x','y'), coords={'x': model.x[0], 'y': model.y[:,0]})
+                sampler = self.sampler()
 
-            while model.t < model.tmax:
-                if sampler.sample_at(model.tc):
-                    for _ in range(config.samples_per_timestep):
-                        layers = []
-                        for layer in range(len(model.u)):
-                            u = xr.DataArray(model.ufull[layer], **kw)
-                            v = xr.DataArray(model.vfull[layer], **kw)
-                            q = xr.DataArray(model.q[layer], **kw)
-                            layers.append(xr.Dataset(data_vars=dict(
-                                x_velocity=u, y_velocity=v, potential_vorticity=q)))
-                        datasets.append(xr.concat(layers, zvals))
-                        timevals.append(model.t)
+                timevals = []
+                datasets = []
+
+                zvals = pd.Index(np.array(['U', 'L']), name='z')
+
+                while model.t < model.tmax:
+                    if sampler.sample_at(model.tc):
+                        for _ in range(config.samples_per_timestep):
+                            layers = []
+                            for layer in range(len(model.u)):
+                                u = xr.DataArray(model.ufull[layer], **kw)
+                                v = xr.DataArray(model.vfull[layer], **kw)
+                                q = xr.DataArray(model.q[layer], **kw)
+                                layers.append(xr.Dataset(data_vars=dict(
+                                    x_velocity=u, y_velocity=v, potential_vorticity=q)))
+                            datasets.append(xr.concat(layers, zvals))
+                            timevals.append(model.t)
+                            model._step_forward()
+                    else:
                         model._step_forward()
-                else:
-                    model._step_forward()
 
-            timevals = pd.Index(np.array(timevals), name='time')
-            simulation = xr.concat(datasets, timevals)
-            simulation.to_netcdf(os.path.join(simulation_dir, 'simulation.nc'))
+                timevals = pd.Index(np.array(timevals), name='time')
+                simulation = xr.concat(datasets, timevals)
+                simulation.to_netcdf(os.path.join(simulation_dir, 'simulation.nc'))
 
             layers = sg.FluidLayer(simulation, periodic=True)
 
