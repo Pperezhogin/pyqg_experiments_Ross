@@ -6,31 +6,7 @@ import pandas as pd
 import subgrid_forcing_tools as sg
 import json
 import gc
-
-"""
-data_dir/
-  nx128-hash1/ 
-    pyqg_params.json
-    models/
-        cnn4/
-            model
-            model_scalex
-            model_scaley
-    simulations/
-        1/
-          data.nc
-          coarse4.nc
-          forcing4.nc
-        2/
-          data.nc
-          coarse4.nc
-          forcing4.nc
-        3/
-          data.nc
-          coarse4.nc
-          forcing4.nc
-  nx32-hash1/ 
-"""
+import pickle
 
 class cachedproperty(object):
   def __init__(self, function):
@@ -111,10 +87,10 @@ class PYQGSubgridDataset(object):
 
     @property
     def pyqg_run_dir(self):
-        return os.path.join(self.data_dir, 'pyqg_runs', md5_hash(self.config['pyqg_kwargs']))
+        return os.path.join(self.data_dir, 'pyqg_runs')#, md5_hash(self.config['pyqg_kwargs']))
 
-    def load(self, key):
-        return xr.open_mfdataset(f"{self.pyqg_run_dir}/*/{key}.nc", combine="nested", concat_dim="run")
+    def load(self, key, **kw):
+        return xr.open_mfdataset(f"{self.pyqg_run_dir}/*/{key}.nc", combine="nested", concat_dim="run", **kw)
 
     def _generate_dataset(self):
         config = Struct(**self.config)
@@ -171,6 +147,9 @@ class PYQGSubgridDataset(object):
                 simulation = xr.concat(datasets, timevals)
                 simulation.to_netcdf(os.path.join(simulation_dir, 'simulation.nc'))
 
+                with open(os.path.join(simulation_dir, 'pyqg_model.pkl'), 'wb') as f:
+                    pickle.dump(model, f)
+
             layers = sg.FluidLayer(simulation, periodic=True)
 
             for sf in config.scale_factors:
@@ -201,7 +180,11 @@ if __name__ == '__main__':
     for param in extra:
         key, val = param.split('=')
         kwargs[key.replace('--', '')] = float(val)
-    kwargs['scale_factors'] = [int(sf) for sf in kwargs['scale_factors'].split(',')]
+    if len(kwargs['scale_factors']):
+        kwargs['scale_factors'] = [int(sf) for sf in kwargs['scale_factors'].split(',')]
+    else:
+        kwargs['scale_factors'] = []
+
 
     ds = PYQGSubgridDataset(**kwargs)
     print(f"Generating {ds.data_dir}")
