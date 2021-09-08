@@ -147,8 +147,20 @@ class PYQGSubgridDataset(object):
                 simulation = xr.concat(datasets, timevals)
                 simulation.to_netcdf(os.path.join(simulation_dir, 'simulation.nc'))
 
-                with open(os.path.join(simulation_dir, 'pyqg_model.pkl'), 'wb') as f:
-                    pickle.dump(model, f)
+                diagnostics_dir = os.path.join(simulation_dir, "diagnostics")
+                os.system(f"mkdir -p {diagnostics_dir}")
+
+                for k, v in model.diagnostics.items():
+                    np.save(os.path.join(diagnostics_dir, f"{k}.npy"), v['value'])
+
+                model_attrs = {}
+                for k, v in model.__dict__.items():
+                    if isinstance(v, float) or isinstance(v, int):
+                        model_attrs[k] = v
+
+                with open(os.path.join(simulation_dir, "model_attrs.json"), 'w') as f:
+                    f.write(json.dumps(model_attrs))
+
 
             layers = sg.FluidLayer(simulation, periodic=True)
 
