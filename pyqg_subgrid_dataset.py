@@ -1,9 +1,9 @@
 import os
 import pyqg
+import gcm_filters
 import numpy as np
 import xarray as xr
 import pandas as pd
-import subgrid_forcing_tools as sg
 import json
 import gc
 import pickle
@@ -51,6 +51,79 @@ class ExponentialSampler(object):
 
 SAMPLERS = { 'uniform': UniformSampler, 'exponential': ExponentialSampler }
 
+def advected(ds, quantity='q'):
+    # Handle double periodicity by padding before differentiating / unpadding afterwards
+    pad = dict(x=(3,3), y=(3,3))
+    unpad = dict(x=slice(3,-3), y=slice(3,-3))
+    
+    # Use second-order diff., though padding might make it unnecessary
+    q = ds[quantity].pad(pad, mode='wrap')
+    dq_dx = q.differentiate('x', edge_order=2).isel(indexers=unpad)
+    dq_dy = q.differentiate('y', edge_order=2).isel(indexers=unpad)
+    
+    # Return the advected quantity
+    return ds.ufull * dq_dx +  ds.vfull * dq_dy
+
+def generate_diff_dataset(nx1=256, nx2=64, dt=3600., sampling_freq=1000, filter=None, **kwargs):
+    scale = nx1//nx2
+    
+    year = 24*60*60*360.
+    pyqg_kwargs = dict(tmax=10*year, tavestart=5*year, dt=dt)
+    pyqg_kwargs.update(**kwargs)
+    
+    if filter is None:
+        filter = gcm_filters.Filter(filter_scale=scale, dx_min=1, grid_type=gcm_filters.GridType.REGULAR)
+
+    def downscaled(ds):
+        return filter.apply(ds, dims=['y','x']).coarsen(x=scale, y=scale).mean()
+
+    m1 = pyqg.QGModel(nx=nx1, **pyqg_kwargs)
+    m2 = pyqg.QGModel(nx=nx2, **pyqg_kwargs)
+    m3 = pyqg.QGModel(nx=nx2, **pyqg_kwargs)
+    
+    # Ensure dissipation on the lower-res simulation matches that of high-res simulation
+    cphi = 0.65 * np.pi
+    wvx = np.sqrt((m3.k * m1.dx)**2. + (m3.l * m1.dy)**2.)
+    filtr = np.exp(-m3.filterfac*(wvx - cphi))
+    filtr[wvx <= cphi] = 1.
+    m3.filtr = filtr
+    
+    datasets1 = []
+    datasets2 = []
+    
+    while m1.t < m1.tmax:
+        if m1.tc % sampling_freq == 0:
+            ds1 = m1.to_dataset().copy(deep=True)
+            ds1_downscaled = downscaled(ds1)
+            m2.set_q1q2(*ds1_downscaled.q.isel(time=0).copy().data)
+            m3.set_q1q2(*ds1_downscaled.q.isel(time=0).copy().data)
+            ds2 = m2.to_dataset().copy(deep=True)
+            ds2['q_forcing_advection'] = (
+                downscaled(advected(ds1, 'q')) -
+                advected(ds1_downscaled, 'q')
+            )
+            m1._step_forward()
+            m2._step_forward()
+            m3._step_forward()
+            q_post = downscaled(m1.to_dataset()).q.isel(time=0).data
+            ds2['q_forcing_diff_dissipation'] = xr.DataArray(
+                np.expand_dims(m2.q - q_post, 0) / dt,
+                coords=[ds2.coords[d] for d in ds2.q.coords]
+            )
+            ds2['q_forcing_same_dissipation'] = xr.DataArray(
+                np.expand_dims(m3.q - q_post, 0) / dt,
+                coords=[ds2.coords[d] for d in ds2.q.coords]
+            )
+            datasets1.append(ds1)
+            datasets2.append(ds2)
+        else:
+            m1._step_forward()
+            m2._step_forward()
+            m3._step_forward()
+    
+    return (xr.concat(datasets1, dim='time'),
+            xr.concat(datasets2, dim='time'))
+
 class PYQGSubgridDataset(object):
     def __init__(self, data_dir='./pyqg_datasets', n_runs=5, sampling_freq=1000, sampling_mode='uniform', sampling_delay=0,
             scale_factors=[2], samples_per_timestep=1,
@@ -92,114 +165,31 @@ class PYQGSubgridDataset(object):
     def load(self, key, **kw):
         return xr.open_mfdataset(f"{self.pyqg_run_dir}/*/{key}.nc", combine="nested", concat_dim="run", **kw)
 
-    def _generate_dataset(self):
+    def execute_pyqg_run(self, i):
         config = Struct(**self.config)
-        pyqg_dir = self.pyqg_run_dir
-
-        os.system(f"mkdir -p {pyqg_dir}")
-
-        with open(os.path.join(self.data_dir, 'config.json'), 'w') as f:
-            f.write(json.dumps(self.config))
-
-        with open(os.path.join(pyqg_dir, 'params.json'), 'w') as f:
-            f.write(json.dumps(config.pyqg_kwargs))
-
-        for run_idx in range(config.n_runs):
-            gc.collect()
-
-            simulation_dir = os.path.join(pyqg_dir, str(run_idx))
-
-            print(simulation_dir)
-
-            if os.path.exists(simulation_dir):
-                print("loading")
-                simulation = xr.open_dataset(os.path.join(simulation_dir, 'simulation.nc'))
-            else:
-                print("running")
-                os.system(f"mkdir -p {simulation_dir}")
-
-                model = pyqg.QGModel(**config.pyqg_kwargs)
-                kw = dict(dims=('x','y'), coords={'x': model.x[0], 'y': model.y[:,0]})
-                sampler = self.sampler()
-
-                timevals = []
-                datasets = []
-
-                zvals = pd.Index(np.array(['U', 'L']), name='z')
-
-                while model.t < model.tmax:
-                    if sampler.sample_at(model.tc):
-                        for _ in range(config.samples_per_timestep):
-                            layers = []
-                            for layer in range(len(model.u)):
-                                u = xr.DataArray(model.ufull[layer], **kw)
-                                v = xr.DataArray(model.vfull[layer], **kw)
-                                q = xr.DataArray(model.q[layer], **kw)
-                                layers.append(xr.Dataset(data_vars=dict(
-                                    x_velocity=u, y_velocity=v, potential_vorticity=q)))
-                            datasets.append(xr.concat(layers, zvals))
-                            timevals.append(model.t)
-                            model._step_forward()
-                    else:
-                        model._step_forward()
-
-                timevals = pd.Index(np.array(timevals), name='time')
-                simulation = xr.concat(datasets, timevals)
-                simulation.to_netcdf(os.path.join(simulation_dir, 'simulation.nc'))
-
-                diagnostics_dir = os.path.join(simulation_dir, "diagnostics")
-                os.system(f"mkdir -p {diagnostics_dir}")
-
-                for k, v in model.diagnostics.items():
-                    np.save(os.path.join(diagnostics_dir, f"{k}.npy"), v['value'])
-
-                model_attrs = {}
-                for k, v in model.__dict__.items():
-                    if isinstance(v, float) or isinstance(v, int):
-                        model_attrs[k] = v
-
-                with open(os.path.join(simulation_dir, "model_attrs.json"), 'w') as f:
-                    f.write(json.dumps(model_attrs))
-
-
-            layers = sg.FluidLayer(simulation, periodic=True)
-
-            for sf in config.scale_factors:
-                coarse_data = layers.downscaled(sf).dataset
-                coarse_data.to_netcdf(os.path.join(simulation_dir, f"coarse{sf}.nc"))
-                del coarse_data
-
-                forcing_data = layers.subgrid_forcings(sf)
-                forcing_data.to_netcdf(os.path.join(simulation_dir, f"forcings{sf}.nc"))
-                del forcing_data
+        simulation_dir = os.path.join(self.pyqg_run_dir, str(i))
+        os.system(f"mkdir -p {simulation_dir}")
+        hires, lores = generate_diff_dataset(sampling_freq=config.sampling_freq, **config.pyqg_kwargs)
+        complex_vars = [k for k,v in hires.variables.items() if v.dtype == np.complex128]
+        hires = hires.drop(complex_vars)
+        lores = lores.drop(complex_vars)
+        hires.to_netcdf(os.path.join(simulation_dir, 'hires.nc'))
+        lores.to_netcdf(os.path.join(simulation_dir, 'lores.nc'))
 
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_dir', type=str)
-    parser.add_argument('--n_runs', type=int, default=1)
-    parser.add_argument('--nx', type=int, default=64)
-    parser.add_argument('--scale_factors', type=str, default='2,4')
-    parser.add_argument('--sampling_freq', type=int, default=1)
-    parser.add_argument('--sampling_mode', type=str, default='uniform')
-    parser.add_argument('--sampling_delay', type=int, default=0)
-    parser.add_argument('--samples_per_timestep', type=int, default=1)
+    parser.add_argument('--run_idx', type=int)
+    parser.add_argument('--sampling_freq', type=int, default=1000)
     args, extra = parser.parse_known_args()
 
     year = 24*60*60*360.
-    kwargs = dict(tmax=10*year, twrite=10000, tavestart=5*year)
+    kwargs = dict(tmax=10*year, tavestart=5*year)
     kwargs.update(args.__dict__)
     for param in extra:
         key, val = param.split('=')
         kwargs[key.replace('--', '')] = float(val)
-    if len(kwargs['scale_factors']):
-        kwargs['scale_factors'] = [int(sf) for sf in kwargs['scale_factors'].split(',')]
-    else:
-        kwargs['scale_factors'] = []
-
-
+    idx = kwargs.pop('run_idx')
     ds = PYQGSubgridDataset(**kwargs)
-    print(f"Generating {ds.data_dir}")
-    print(kwargs)
-    ds._generate_dataset()
-    print("Done!")
+    ds.execute_pyqg_run(idx)
