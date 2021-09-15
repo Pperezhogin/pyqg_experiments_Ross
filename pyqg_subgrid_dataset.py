@@ -18,38 +18,9 @@ class cachedproperty(object):
     value = instance.__dict__[self.function.__name__] = self.function(instance)
     return value
 
-def md5_hash(*args):
-    import hashlib
-    return hashlib.md5(json.dumps(args).encode('utf-8')).hexdigest()
-
 def Struct(**kwargs):
     from collections import namedtuple
     return namedtuple('Struct', ' '.join(kwargs.keys()))(**kwargs)
-
-class UniformSampler(object):
-    def __init__(self, freq, delay=0):
-        self.freq = freq
-        self.delay = delay
-
-    def sample_at(self, t):
-        return t >= self.delay and t % self.freq == 0
-
-class ExponentialSampler(object):
-    def __init__(self, freq, delay=0):
-        self.freq = freq
-        self.reset(delay)
-
-    def reset(self, t):
-        self.next_time = t + int(np.random.exponential(self.freq))
-
-    def sample_at(self, t):
-        if t >= self.next_time:
-            self.reset(t)
-            return True
-        else:
-            return False
-
-SAMPLERS = { 'uniform': UniformSampler, 'exponential': ExponentialSampler }
 
 def advected(ds, quantity='q'):
     # Handle double periodicity by padding before differentiating / unpadding afterwards
@@ -66,7 +37,7 @@ def advected(ds, quantity='q'):
 
 def generate_control_dataset(nx=64, dt=3600., sampling_freq=1000, **kwargs):
     year = 24*60*60*360.
-    pyqg_kwargs = dict(tmax=10*year, tavestart=5*year, dt=dt)
+    pyqg_kwargs = dict(tmax=5*year, tavestart=2.5*year, dt=dt)
     pyqg_kwargs.update(**kwargs)
 
     m = pyqg.QGModel(nx=nx, **pyqg_kwargs)
@@ -78,13 +49,23 @@ def generate_control_dataset(nx=64, dt=3600., sampling_freq=1000, **kwargs):
             datasets.append(ds)
         m._step_forward()
 
-    return xr.concat(datasets, dim='time')
+    d = xr.concat(datasets, dim='time')
+    
+    for k,v in datasets[-1].variables.items():
+        if k not in d:
+            d[k] = v.isel(time=-1)
+
+    for k,v in d.variables.items():
+        if v.dtype == np.float64:
+            d[k] = v.astype(np.float32)
+
+    return d
 
 def generate_forcing_dataset(nx1=256, nx2=64, dt=3600., sampling_freq=1000, filter=None, **kwargs):
     scale = nx1//nx2
     
     year = 24*60*60*360.
-    pyqg_kwargs = dict(tmax=10*year, tavestart=5*year, dt=dt)
+    pyqg_kwargs = dict(tmax=5*year, tavestart=2.5*year, dt=dt)
     pyqg_kwargs.update(**kwargs)
     
     if filter is None:
@@ -103,10 +84,23 @@ def generate_forcing_dataset(nx1=256, nx2=64, dt=3600., sampling_freq=1000, filt
     filtr = np.exp(-m3.filterfac*(wvx - cphi))
     filtr[wvx <= cphi] = 1.
     m3.filtr = filtr
+
+    # Set the diagnostics of the coarse simulation to be those of the hi-res
+    # simulation, but downscaled
+    old_inc = m2._increment_diagnostics
+    def new_inc():
+        ds1 = m1.to_dataset().copy(deep=True)
+        ds2 = m2.to_dataset().copy(deep=True)
+        m2.set_q1q2(*downscaled(ds1).q.isel(time=0).copy().data)
+        m2._invert()
+        old_inc()
+        m2.set_q1q2(*ds2.q.isel(time=0).copy().data)
+        m2._invert()
+    m2._increment_diagnostics = new_inc
     
     datasets1 = []
     datasets2 = []
-    
+
     while m1.t < m1.tmax:
         if m1.tc % sampling_freq == 0:
             ds1 = m1.to_dataset().copy(deep=True)
@@ -137,8 +131,23 @@ def generate_forcing_dataset(nx1=256, nx2=64, dt=3600., sampling_freq=1000, filt
             m2._step_forward()
             m3._step_forward()
     
-    return (xr.concat(datasets1, dim='time'),
-            xr.concat(datasets2, dim='time'))
+    d1 = xr.concat(datasets1, dim='time')
+    d2 = xr.concat(datasets2, dim='time')
+    
+    for k,v in datasets1[-1].variables.items():
+        if k not in d1:
+            d1[k] = v.isel(time=-1)
+            
+    for k,v in datasets2[-1].variables.items():
+        if k not in d2:
+            d2[k] = v.isel(time=-1)
+
+    for d in [d1,d2]:
+        for k,v in d.variables.items():
+            if v.dtype == np.float64:
+                d[k] = v.astype(np.float32)
+            
+    return d1, d2
 
 class PYQGSubgridDataset(object):
     def __init__(self, data_dir='./pyqg_datasets', n_runs=5, sampling_freq=1000, sampling_mode='uniform', sampling_delay=0,
@@ -210,9 +219,7 @@ if __name__ == '__main__':
     parser.add_argument('--sampling_freq', type=int, default=1000)
     args, extra = parser.parse_known_args()
 
-    year = 24*60*60*360.
-    kwargs = dict(tmax=10*year, tavestart=5*year)
-    kwargs.update(args.__dict__)
+    kwargs = {}
     for param in extra:
         key, val = param.split('=')
         kwargs[key.replace('--', '')] = float(val)
