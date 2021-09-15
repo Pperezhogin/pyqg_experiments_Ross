@@ -150,19 +150,11 @@ def generate_forcing_dataset(nx1=256, nx2=64, dt=3600., sampling_freq=1000, filt
     return d1, d2
 
 class PYQGSubgridDataset(object):
-    def __init__(self, data_dir='./pyqg_datasets', n_runs=5, sampling_freq=1000, sampling_mode='uniform', sampling_delay=0,
-            scale_factors=[2], samples_per_timestep=1,
-            **pyqg_kwargs):
+    def __init__(self, data_dir='./pyqg_datasets', sampling_freq=1000, **pyqg_kwargs):
         self.data_dir = data_dir
-        self.sampler = lambda: SAMPLERS[sampling_mode](sampling_freq, sampling_delay)
         self.config = dict(
-            n_runs=n_runs,
             pyqg_kwargs=pyqg_kwargs,
-            scale_factors=scale_factors,
             sampling_freq=sampling_freq,
-            sampling_mode=sampling_mode,
-            sampling_delay=sampling_delay,
-            samples_per_timestep=samples_per_timestep
         )
 
     @property
@@ -219,12 +211,14 @@ if __name__ == '__main__':
     parser.add_argument('--sampling_freq', type=int, default=1000)
     args, extra = parser.parse_known_args()
 
-    kwargs = {}
+    kwargs = dict(sampling_freq=args.sampling_freq)
     for param in extra:
         key, val = param.split('=')
         kwargs[key.replace('--', '')] = float(val)
-    idx = kwargs.pop('run_idx')
-    control = kwargs.pop('control')
+    idx = args.run_idx
+    control = args.control
+    print(args)
+    print(kwargs)
     ds = PYQGSubgridDataset(**kwargs)
     if control:
         ds.execute_control_run(idx)
