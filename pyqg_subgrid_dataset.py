@@ -64,7 +64,23 @@ def advected(ds, quantity='q'):
     # Return the advected quantity
     return ds.ufull * dq_dx +  ds.vfull * dq_dy
 
-def generate_diff_dataset(nx1=256, nx2=64, dt=3600., sampling_freq=1000, filter=None, **kwargs):
+def generate_control_dataset(nx=64, dt=3600., sampling_freq=1000, **kwargs):
+    year = 24*60*60*360.
+    pyqg_kwargs = dict(tmax=10*year, tavestart=5*year, dt=dt)
+    pyqg_kwargs.update(**kwargs)
+
+    m = pyqg.QGModel(nx=nx, **pyqg_kwargs)
+    datasets = []
+
+    while m.t < m.tmax:
+        if m.tc % sampling_freq == 0:
+            ds = m.to_dataset().copy(deep=True)
+            datasets.append(ds)
+        m._step_forward()
+
+    return xr.concat(datasets, dim='time')
+
+def generate_forcing_dataset(nx1=256, nx2=64, dt=3600., sampling_freq=1000, filter=None, **kwargs):
     scale = nx1//nx2
     
     year = 24*60*60*360.
@@ -165,11 +181,20 @@ class PYQGSubgridDataset(object):
     def load(self, key, **kw):
         return xr.open_mfdataset(f"{self.pyqg_run_dir}/*/{key}.nc", combine="nested", concat_dim="run", **kw)
 
-    def execute_pyqg_run(self, i):
+    def execute_control_run(self, i):
         config = Struct(**self.config)
         simulation_dir = os.path.join(self.pyqg_run_dir, str(i))
         os.system(f"mkdir -p {simulation_dir}")
-        hires, lores = generate_diff_dataset(sampling_freq=config.sampling_freq, **config.pyqg_kwargs)
+        ds = generate_control_dataset(sampling_freq=config.sampling_freq, **config.pyqg_kwargs)
+        complex_vars = [k for k,v in ds.variables.items() if v.dtype == np.complex128]
+        ds = ds.drop(complex_vars)
+        ds.to_netcdf(os.path.join(simulation_dir, 'control.nc'))
+
+    def execute_forcing_run(self, i):
+        config = Struct(**self.config)
+        simulation_dir = os.path.join(self.pyqg_run_dir, str(i))
+        os.system(f"mkdir -p {simulation_dir}")
+        hires, lores = generate_forcing_dataset(sampling_freq=config.sampling_freq, **config.pyqg_kwargs)
         complex_vars = [k for k,v in hires.variables.items() if v.dtype == np.complex128]
         hires = hires.drop(complex_vars)
         lores = lores.drop(complex_vars)
@@ -181,6 +206,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_dir', type=str)
     parser.add_argument('--run_idx', type=int)
+    parser.add_argument('--control', type=int, default=0)
     parser.add_argument('--sampling_freq', type=int, default=1000)
     args, extra = parser.parse_known_args()
 
@@ -191,5 +217,9 @@ if __name__ == '__main__':
         key, val = param.split('=')
         kwargs[key.replace('--', '')] = float(val)
     idx = kwargs.pop('run_idx')
+    control = kwargs.pop('control')
     ds = PYQGSubgridDataset(**kwargs)
-    ds.execute_pyqg_run(idx)
+    if control:
+        ds.execute_control_run(idx)
+    else:
+        ds.execute_forcing_run(idx)
