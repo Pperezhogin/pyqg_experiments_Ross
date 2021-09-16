@@ -37,15 +37,15 @@ def advected(ds, quantity='q'):
 
 def generate_parameterized_dataset(cnn0, cnn1, inputs, **kwargs):
     def get_inputs(m,z):
-        return np.array([
+        return np.array([[
             getattr(m,inp)[z]
             for inp in inputs.split(",")
-        ])
+        ]]).astype(np.float32)
 
     def q_parameterization(m):
         dq = np.array([
-            cnn0.predict(get_inputs(m,0))[0],
-            cnn1.predict(get_inputs(m,1))[0]
+            cnn0.predict(get_inputs(m,0))[0,0],
+            cnn1.predict(get_inputs(m,1))[0,0]
         ]).astype(m.q.dtype)
         return dq
 
