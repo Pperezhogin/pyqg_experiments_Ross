@@ -211,7 +211,7 @@ if __name__ == '__main__':
     parser.add_argument('--sampling_freq', type=int, default=1000)
     args, extra = parser.parse_known_args()
 
-    kwargs = dict(sampling_freq=args.sampling_freq)
+    kwargs = dict(sampling_freq=args.sampling_freq, data_dir=args.data_dir)
     for param in extra:
         key, val = param.split('=')
         kwargs[key.replace('--', '')] = float(val)
