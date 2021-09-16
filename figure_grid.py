@@ -1,4 +1,10 @@
+import os
+import matplotlib
+if os.path.exists('/scratch'):
+    matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
+
 class figure_grid():
     def next_subplot(self, title=None, **kwargs):
         if self.next_title is not None:

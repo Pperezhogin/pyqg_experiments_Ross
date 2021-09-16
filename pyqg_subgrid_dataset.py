@@ -35,6 +35,22 @@ def advected(ds, quantity='q'):
     # Return the advected quantity
     return ds.ufull * dq_dx +  ds.vfull * dq_dy
 
+def generate_parameterized_dataset(cnn0, cnn1, inputs, **kwargs):
+    def get_inputs(m,z):
+        return np.array([
+            getattr(m,inp)[z]
+            for inp in inputs.split(",")
+        ])
+
+    def q_parameterization(m):
+        dq = np.array([
+            cnn0.predict(get_inputs(m,0))[0],
+            cnn1.predict(get_inputs(m,1))[0]
+        ]).astype(m.q.dtype)
+        return dq
+
+    return generate_control_dataset(q_parameterization=q_parameterization, **kwargs)
+
 def generate_control_dataset(nx=64, dt=3600., sampling_freq=1000, **kwargs):
     year = 24*60*60*360.
     pyqg_kwargs = dict(tmax=5*year, tavestart=2.5*year, dt=dt)
