@@ -9,16 +9,16 @@ from models import *
 import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('--data_dir', type=str, default="/scratch/zanna/data/pyqg/pyqg_runs")
-parser.add_argument('--inputs', type=str, default="q")
-parser.add_argument('--target', type=str, default="q_forcing_advection")
-parser.add_argument('--model', type=str, default="basic_cnn")
 parser.add_argument('--save_dir', type=str, default='')
+parser.add_argument('--inputs', type=str, default="u,v,q")
+parser.add_argument('--target', type=str, default="q_forcing_advection")
+parser.add_argument('--model', type=str, default="fully_cnn")
 args = parser.parse_args()
 
 if len(args.save_dir):
     save_dir = args.save_dir
 else:
-    save_dir = f"{args.data_dir}/{args.model}"
+    save_dir = f"{args.data_dir}/{args.model}_{args.target}"
 
 os.system(f"mkdir -p {save_dir}") 
 

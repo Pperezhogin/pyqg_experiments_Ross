@@ -10,19 +10,23 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('--data_dir', type=str, default="/scratch/zanna/data/pyqg/pyqg_runs")
 parser.add_argument('--save_dir', type=str, default='')
-parser.add_argument('--inputs', type=str, default="q")
-parser.add_argument('--model', type=str, default="basic_cnn")
+parser.add_argument('--inputs', type=str, default="u,v,q")
+parser.add_argument('--target', type=str, default="q_forcing_advection")
+parser.add_argument('--model', type=str, default="fully_cnn")
 parser.add_argument('--n_runs', type=int, default=16)
 args = parser.parse_args()
 
 if args.save_dir == '':
-    save_dir = f"{args.data_dir}/{args.model}"
+    save_dir = f"{args.data_dir}/{args.model}_{args.target}"
 else:
     save_dir = args.save_dir
 
 if args.model == 'basic_cnn':
     cnn0 = BasicCNN((len(args.inputs.split(",")),64,64), (1,64,64))
     cnn1 = BasicCNN((len(args.inputs.split(",")),64,64), (1,64,64))
+elif args.model == 'fully_cnn':
+    cnn0 = FullyCNN(len(args.inputs.split(","), 1)
+    cnn1 = FullyCNN(len(args.inputs.split(","), 1)
 else:
     assert False
 
