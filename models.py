@@ -116,3 +116,32 @@ class BasicCNN(nn.Sequential, ScaledModel):
             ('fc2', nn.Linear(256, np.product(output_shape))),
             ('unflatten', nn.Unflatten(1, output_shape))
         ]))
+
+class FullyCNN(nn.Sequential, ScaledModel):
+    def __init__(self, n_in: int = 3, n_out: int = 1, padding='same', batch_norm=True):
+        if padding is None:
+            padding_5 = 0
+            padding_3 = 0
+        elif padding == 'same':
+            padding_5 = 2
+            padding_3 = 1
+        else:
+            raise ValueError('Unknow value for padding parameter.')
+        self.n_in = n_in
+        self.batch_norm = batch_norm
+        block1 = self._make_subblock(nn.Conv2d(n_in, 128, 5, padding=padding_5))
+        block2 = self._make_subblock(nn.Conv2d(128, 64, 5, padding=padding_5))
+        block3 = self._make_subblock(nn.Conv2d(64, 32, 3, padding=padding_3))
+        block4 = self._make_subblock(nn.Conv2d(32, 32, 3, padding=padding_3))
+        block5 = self._make_subblock(nn.Conv2d(32, 32, 3, padding=padding_3))
+        block6 = self._make_subblock(nn.Conv2d(32, 32, 3, padding=padding_3))
+        block7 = self._make_subblock(nn.Conv2d(32, 32, 3, padding=padding_3))
+        conv8 = nn.Conv2d(32, n_out, 3, padding=padding_3)
+        super().__init__(*block1, *block2, *block3, *block4, *block5,
+                            *block6, *block7, conv8)
+
+    def _make_subblock(self, conv):
+        subbloc = [conv, nn.ReLU()]
+        if self.batch_norm:
+            subbloc.append(nn.BatchNorm2d(conv.out_channels))
+        return subbloc

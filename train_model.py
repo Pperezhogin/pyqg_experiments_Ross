@@ -61,6 +61,8 @@ for z in range(2):
 
     if args.model == 'basic_cnn':
         model = BasicCNN(X_train.shape[1:], Y_train.shape[1:])
+    elif args.model == 'fully_cnn':
+        model = FullyCNN(X_train.shape[1], Y_train.shape[1])
     else:
         assert False
 
