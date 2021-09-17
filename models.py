@@ -63,10 +63,12 @@ class ScaledModel(object):
 
     def save(self, path):
         torch.save(self.state_dict(), path)
+        print(f"saved model to {path}")
         with open(f"{path}.input_scale.pkl", 'wb') as f:
             pickle.dump(self.input_scale, f)
         with open(f"{path}.output_scale.pkl", 'wb') as f:
             pickle.dump(self.output_scale, f)
+        print(f"saved scales")
 
     def load(self, path):
         self.load_state_dict(torch.load(path))
@@ -75,22 +77,42 @@ class ScaledModel(object):
         with open(f"{path}.output_scale.pkl", 'rb') as f:
             self.output_scale = pickle.load(f)
 
+class BasicScaler(object):
+    def __init__(self, mu=0, sd=1):
+        self.mu = mu
+        self.sd = sd
+    
+    def fit(self, x):
+        assert(len(x.shape)==2)
+        self.mu = np.mean(x)
+        self.sd = np.std(x)
+        
+    def transform(self, x):
+        return (x - self.mu) / self.sd
+    
+    def inverse_transform(self, z):
+        return z * self.sd + self.mu
+
 class BasicCNN(nn.Sequential, ScaledModel):
-    def __init__(self, input_shape, output_shape):
+    def __init__(self, input_shape, output_shape, pad='circular'):
         conv = nn.Sequential(OrderedDict([
-            ('unflatten', nn.Unflatten(1, input_shape)),
-            ('conv1', nn.Conv2d(input_shape[0], 32, 5)),
+            ('conv1', nn.Conv2d(input_shape[0], 64, 5, padding_mode=pad)),
+            ('norm1', nn.BatchNorm2d(64)),
             ('relu1', nn.ReLU()),
             ('pool1', nn.MaxPool2d(2)),
-            ('conv2', nn.Conv2d(32, 32, 5)),
+
+            ('conv2', nn.Conv2d(64, 32, 5, padding_mode=pad)),
+            ('norm2', nn.BatchNorm2d(32)),
             ('relu2', nn.ReLU()),
             ('pool2', nn.MaxPool2d(2)),
+
             ('flat', nn.Flatten())
         ]))
-        fc_size = conv(torch.rand(1,np.product(input_shape))).shape[1]
+        fc_size = conv(torch.rand(2,*input_shape)).shape[1]
         super().__init__(OrderedDict([
             ('conv', conv),
             ('fc1', nn.Linear(fc_size, 256)),
             ('relu', nn.ReLU()),
-            ('fc2', nn.Linear(256, np.product(output_shape)))
+            ('fc2', nn.Linear(256, np.product(output_shape))),
+            ('unflatten', nn.Unflatten(1, output_shape))
         ]))

@@ -1,6 +1,7 @@
 import xarray as xr
 import numpy as np
 
+import os
 import sys
 sys.path.append('.')
 from models import *
@@ -8,16 +9,18 @@ from models import *
 import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('--data_dir', type=str, default="/scratch/zanna/data/pyqg/pyqg_runs")
-parser.add_argument('--inputs', type=str, default="u,v")
+parser.add_argument('--inputs', type=str, default="q")
 parser.add_argument('--target', type=str, default="q_forcing_advection")
 parser.add_argument('--model', type=str, default="basic_cnn")
-parser.add_argument('--save_path', type=str, default='')
+parser.add_argument('--save_dir', type=str, default='')
 args = parser.parse_args()
 
-if args.save_path == '':
-    save_path = f"{args.data_dir}/{args.model}"
+if len(args.save_dir):
+    save_dir = args.save_dir
 else:
-    save_path = args.save_path
+    save_dir = f"{args.data_dir}/{args.model}"
+
+os.system(f"mkdir -p {save_dir}") 
 
 ds = xr.open_mfdataset(f"{args.data_dir}/*/lores.nc", combine="nested", concat_dim="run")
 
@@ -61,12 +64,15 @@ for z in range(2):
     else:
         assert False
 
-    model_path = f"{save_path}_z{z}"
     model.set_scales(X_scale, Y_scale)
-    model.fit(X_train, Y_train, num_epochs=100)
+    model.fit(X_train, Y_train, num_epochs=25)
+    print("Finished fitting")
+
+    model_path = f"{save_dir}/model_z{z}"
     model.save(model_path)
+    print("Finished saving")
 
     mse = model.mse(X_test, Y_test)
     print(f"MSE: {mse}")
     with open(f"{model_path}_mse.txt", 'w') as f:
-        f.write(mse)
+        f.write(str(mse))
