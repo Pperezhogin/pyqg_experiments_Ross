@@ -26,8 +26,8 @@ if args.model == 'basic_cnn':
     cnn0 = BasicCNN((len(args.inputs.split(",")),64,64), (1,64,64))
     cnn1 = BasicCNN((len(args.inputs.split(",")),64,64), (1,64,64))
 elif args.model == 'fully_cnn':
-    cnn0 = FullyCNN(len(args.inputs.split(","), 1))
-    cnn1 = FullyCNN(len(args.inputs.split(","), 1))
+    cnn0 = FullyCNN(len(args.inputs.split(",")), 1)
+    cnn1 = FullyCNN(len(args.inputs.split(",")), 1)
 else:
     assert False
 
