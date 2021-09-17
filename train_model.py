@@ -67,7 +67,7 @@ for z in range(2):
         assert False
 
     model.set_scales(X_scale, Y_scale)
-    model.fit(X_train, Y_train, num_epochs=25)
+    model.fit(X_train, Y_train, num_epochs=50)
     print("Finished fitting")
 
     model_path = f"{save_dir}/model_z{z}"

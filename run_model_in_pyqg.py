@@ -26,8 +26,8 @@ if args.model == 'basic_cnn':
     cnn0 = BasicCNN((len(args.inputs.split(",")),64,64), (1,64,64))
     cnn1 = BasicCNN((len(args.inputs.split(",")),64,64), (1,64,64))
 elif args.model == 'fully_cnn':
-    cnn0 = FullyCNN(len(args.inputs.split(","), 1)
-    cnn1 = FullyCNN(len(args.inputs.split(","), 1)
+    cnn0 = FullyCNN(len(args.inputs.split(","), 1))
+    cnn1 = FullyCNN(len(args.inputs.split(","), 1))
 else:
     assert False
 
@@ -39,4 +39,5 @@ os.system(f"mkdir -p {run_dir}")
 
 for i in range(args.n_runs):
     run = generate_parameterized_dataset(cnn0, cnn1, args.inputs)
-    run.to_netcdf(os.path.join(run_dir, f"{i}.nc"))
+    complex_vars = [k for k,v in run.variables.items() if v.dtype == np.complex128]
+    run.drop(complex_vars).to_netcdf(os.path.join(run_dir, f"{i}.nc"))
