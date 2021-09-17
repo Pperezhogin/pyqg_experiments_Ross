@@ -66,11 +66,15 @@ for z in range(2):
     else:
         assert False
 
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+
     model.set_scales(X_scale, Y_scale)
-    model.fit(X_train, Y_train, num_epochs=50)
+    model.fit(X_train, Y_train, num_epochs=100, device=device)
     print("Finished fitting")
 
     model_path = f"{save_dir}/model_z{z}"
+    model.cpu()
     model.save(model_path)
     print("Finished saving")
 

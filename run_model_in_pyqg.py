@@ -14,7 +14,7 @@ parser.add_argument('--save_dir', type=str, default='')
 parser.add_argument('--inputs', type=str, default="u,v,q")
 parser.add_argument('--target', type=str, default="q_forcing_advection")
 parser.add_argument('--model', type=str, default="fully_cnn")
-parser.add_argument('--n_runs', type=int, default=16)
+parser.add_argument('--run_idx', type=int)
 args = parser.parse_args()
 
 if args.save_dir == '':
@@ -37,7 +37,7 @@ cnn1.load(f"{save_dir}/model_z1")
 run_dir = os.path.join(save_dir, "parameterized_pyqg_runs")
 os.system(f"mkdir -p {run_dir}")
 
-for i in range(args.n_runs):
-    run = generate_parameterized_dataset(cnn0, cnn1, args.inputs)
-    complex_vars = [k for k,v in run.variables.items() if v.dtype == np.complex128]
-    run.drop(complex_vars).to_netcdf(os.path.join(run_dir, f"{i}.nc"))
+i = args.run_idx
+run = generate_parameterized_dataset(cnn0, cnn1, args.inputs)
+complex_vars = [k for k,v in run.variables.items() if v.dtype == np.complex128]
+run.drop(complex_vars).to_netcdf(os.path.join(run_dir, f"{i}.nc"))

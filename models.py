@@ -17,7 +17,9 @@ def minibatch(inputs, targets, batch_size=64, as_tensor=True):
         y = xform(targets[idx])
         yield x, y
 
-def train(net, inputs, targets, num_epochs=50, batch_size=64, learning_rate=0.001):
+def train(net, inputs, targets, num_epochs=50, batch_size=64, learning_rate=0.001, device=None):
+    if device is None:
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     optimizer = optim.Adam(net.parameters(), lr=learning_rate)
     criterion = nn.MSELoss()
     for epoch in range(num_epochs):
@@ -25,8 +27,8 @@ def train(net, inputs, targets, num_epochs=50, batch_size=64, learning_rate=0.00
         epoch_steps = 0
         for x, y in minibatch(inputs, targets, batch_size=batch_size):
             optimizer.zero_grad()
-            yhat = net(x)
-            loss = criterion(yhat, y)
+            yhat = net(x.to(device))
+            loss = criterion(yhat, y.to(device))
             loss.backward()
             optimizer.step()
             epoch_loss += loss.item()
@@ -38,15 +40,17 @@ class ScaledModel(object):
         self.input_scale = input_scale
         self.output_scale = output_scale
 
-    def predict(self, inputs):
+    def predict(self, inputs, device=None):
         assert isinstance(inputs, np.ndarray)
         scaled = self.input_scale.transform(inputs)
         tensor = torch.as_tensor(scaled)
+        if device is not None:
+            tensor = tensor.to(device)
         with torch.no_grad():
-            output = self.forward(tensor).numpy()
+            output = self.forward(tensor).cpu().numpy()
         return self.output_scale.inverse_transform(output)
 
-    def mse(self, inputs, targets):
+    def mse(self, inputs, targets, device=None):
         mse = nn.MSELoss()
         mses = []
         for x, y in minibatch(inputs, targets, as_tensor=False):

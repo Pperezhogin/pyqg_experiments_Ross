@@ -36,6 +36,11 @@ def advected(ds, quantity='q'):
     return ds.ufull * dq_dx +  ds.vfull * dq_dy
 
 def generate_parameterized_dataset(cnn0, cnn1, inputs, **kwargs):
+    import torch
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    cnn0.to(device)
+    cnn1.to(device)
+
     def get_inputs(m,z):
         return np.array([[
             getattr(m,inp)[z]
@@ -44,8 +49,8 @@ def generate_parameterized_dataset(cnn0, cnn1, inputs, **kwargs):
 
     def q_parameterization(m):
         dq = np.array([
-            cnn0.predict(get_inputs(m,0))[0,0],
-            cnn1.predict(get_inputs(m,1))[0,0]
+            cnn0.predict(get_inputs(m,0), device=device)[0,0],
+            cnn1.predict(get_inputs(m,1), device=device)[0,0]
         ]).astype(m.q.dtype)
         return dq
 
