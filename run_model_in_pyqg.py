@@ -1,6 +1,7 @@
 import xarray as xr
 import numpy as np
 import matplotlib.pyplot as plt
+import os
 import sys
 sys.path.append('.')
 from models import *
@@ -33,7 +34,9 @@ else:
 cnn0.load(f"{save_dir}/model_z0")
 cnn1.load(f"{save_dir}/model_z1")
 
-runs =  xr.concat(
-    [generate_parameterized_dataset(cnn0, cnn1, args.inputs) for _ in range(args.n_runs)], "run")
+run_dir = os.path.join(save_dir, "parameterized_pyqg_runs")
+os.system(f"mkdir -p {run_dir}")
 
-runs.to_netcdf(os.path.join(save_dir, "parameterized_pyqg_runs.nc"))
+for i in range(args.n_runs):
+    run = generate_parameterized_dataset(cnn0, cnn1, args.inputs)
+    run.to_netcdf(os.path.join(run_dir, f"{i}.nc"))
