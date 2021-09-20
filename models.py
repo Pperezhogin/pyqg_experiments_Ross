@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -38,10 +39,14 @@ def train(net, inputs, targets, num_epochs=50, batch_size=64, learning_rate=0.00
 class ScaledModel(object):
     def forward(self, x):
         r = super().forward(x)
-        if hasattr(self, 'zero_mean') and getattr(self, 'zero_mean'):
+        if self.is_zero_mean:
             return r - r.mean(dim=(1,2,3), keepdim=True)
         else:
             return r
+
+    @property
+    def is_zero_mean(self):
+        return hasattr(self, 'zero_mean') and getattr(self, 'zero_mean')
 
     def set_zero_mean(self, zero_mean=True):
         self.zero_mean = zero_mean
@@ -82,7 +87,8 @@ class ScaledModel(object):
             pickle.dump(self.input_scale, f)
         with open(f"{path}.output_scale.pkl", 'wb') as f:
             pickle.dump(self.output_scale, f)
-        print(f"saved scales")
+        if self.is_zero_mean:
+            open(f"{path}.zero_mean", 'a').close()
 
     def load(self, path):
         self.load_state_dict(torch.load(path))
@@ -90,6 +96,8 @@ class ScaledModel(object):
             self.input_scale = pickle.load(f)
         with open(f"{path}.output_scale.pkl", 'rb') as f:
             self.output_scale = pickle.load(f)
+        if os.path.exists(f"{path}.zero_mean"):
+            self.set_zero_mean()
 
 class BasicScaler(object):
     def __init__(self, mu=0, sd=1):
