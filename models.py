@@ -22,6 +22,7 @@ def train(net, inputs, targets, num_epochs=50, batch_size=64, learning_rate=0.00
     if device is None:
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     optimizer = optim.Adam(net.parameters(), lr=learning_rate)
+    scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[int(num_epochs/2), int(num_epochs*3/4), int(num_epochs*7/8)], gamma=0.1)
     criterion = nn.MSELoss()
     for epoch in range(num_epochs):
         epoch_loss = 0.0
@@ -35,6 +36,7 @@ def train(net, inputs, targets, num_epochs=50, batch_size=64, learning_rate=0.00
             epoch_loss += loss.item()
             epoch_steps += 1
         print(f"Loss after Epoch {epoch+1}: {epoch_loss/epoch_steps}")
+        scheduler.step()
 
 class ScaledModel(object):
     def forward(self, x):
