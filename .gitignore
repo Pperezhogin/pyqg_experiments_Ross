@@ -3,3 +3,6 @@ __pycache__/
 slurm*.out
 *.swp
 *.swo
+*.swn
+*.swl
+*.swm

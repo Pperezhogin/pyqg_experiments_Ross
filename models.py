@@ -27,7 +27,7 @@ def train(net, inputs, targets, num_epochs=50, batch_size=64, learning_rate=0.00
         epoch_steps = 0
         for x, y in minibatch(inputs, targets, batch_size=batch_size):
             optimizer.zero_grad()
-            yhat = net(x.to(device))
+            yhat = net.forward(x.to(device))
             loss = criterion(yhat, y.to(device))
             loss.backward()
             optimizer.step()
@@ -36,6 +36,16 @@ def train(net, inputs, targets, num_epochs=50, batch_size=64, learning_rate=0.00
         print(f"Loss after Epoch {epoch+1}: {epoch_loss/epoch_steps}")
 
 class ScaledModel(object):
+    def forward(self, x):
+        r = super().forward(x)
+        if hasattr(self, 'zero_mean') and getattr(self, 'zero_mean'):
+            return r - r.mean(dim=(1,2,3), keepdim=True)
+        else:
+            return r
+
+    def set_zero_mean(self, zero_mean=True):
+        self.zero_mean = zero_mean
+
     def set_scales(self, input_scale, output_scale):
         self.input_scale = input_scale
         self.output_scale = output_scale
