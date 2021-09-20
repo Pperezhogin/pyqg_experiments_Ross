@@ -56,6 +56,47 @@ def generate_parameterized_dataset(cnn0, cnn1, inputs, **kwargs):
 
     return generate_control_dataset(q_parameterization=q_parameterization, **kwargs)
 
+def generate_parameterized_dataset2(cnn0, cnn1, inputs, nx=64, dt=3600., **kwargs):
+    def get_inputs(m,z):
+        return np.array([[
+            getattr(m,inp)[z]
+            for inp in inputs.split(",")
+        ]]).astype(np.float32)
+
+    def q_parameterization(m):
+        dq = np.array([
+            cnn0.predict(get_inputs(m,0))[0,0],
+            cnn1.predict(get_inputs(m,1))[0,0]
+        ]).astype(m.q.dtype)
+        return dq
+
+    year = 24*60*60*360.
+    pyqg_kwargs = dict(tmax=5*year, tavestart=2.5*year, dt=dt)
+    pyqg_kwargs.update(**kwargs)
+
+    m = pyqg.QGModel(nx=nx, **pyqg_kwargs)
+    datasets = []
+
+    while m.t < m.tmax:
+        dq = q_parameterization(m) * dt
+        if m.tc % sampling_freq == 0:
+            ds = m.to_dataset().copy(deep=True)
+            datasets.append(ds)
+        m._step_forward()
+        m.set_q1q2(*(m.q + dq))
+
+    d = xr.concat(datasets, dim='time')
+    
+    for k,v in datasets[-1].variables.items():
+        if k not in d:
+            d[k] = v.isel(time=-1)
+
+    for k,v in d.variables.items():
+        if v.dtype == np.float64:
+            d[k] = v.astype(np.float32)
+
+    return d
+
 def generate_control_dataset(nx=64, dt=3600., sampling_freq=1000, **kwargs):
     year = 24*60*60*360.
     pyqg_kwargs = dict(tmax=5*year, tavestart=2.5*year, dt=dt)
