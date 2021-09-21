@@ -12,7 +12,7 @@ template = """#!/bin/bash
 
 module purge
 
-singularity exec --nv --overlay /scratch/asr9645/envs/m2lines.ext3:ro /scratch/work/public/singularity/cuda11.1-cudnn8-devel-ubuntu18.04.sif /bin/bash -c "source /ext3/env.sh; python -u run_model_in_pyqg.py --model={model} --inputs={inputs} --target={target} --run_idx={idx}"
+singularity exec --nv --overlay /scratch/asr9645/envs/m2lines.ext3:ro /scratch/work/public/singularity/cuda11.1-cudnn8-devel-ubuntu18.04.sif /bin/bash -c "source /ext3/env.sh; python -u run_model_in_pyqg.py {args}"
 """
 
 import os
@@ -21,17 +21,22 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--inputs', type=str, default="u,v,q")
 parser.add_argument('--target', type=str, default="q_forcing_advection")
 parser.add_argument('--model', type=str, default="fully_cnn")
+parser.add_argument('--save_dir', type=str, default="")
 parser.add_argument('--n_runs', type=int, default=16)
 parser.add_argument('--start_idx', type=int, default=0)
 args = parser.parse_args()
 
 for i in range(args.n_runs):
-    cmd = template.format(
-            inputs=args.inputs,
-            target=args.target,
-            model=args.model,
-            idx=i + args.start_idx,
-        )
+    cmd_args = "--model={model} --inputs={inputs} --target={target} --run_idx={idx}".format(
+        inputs=args.inputs,
+        target=args.target,
+        model=args.model,
+        idx=i + args.start_idx,
+    )
+    if len(args.save_dir):
+        cmd_args += f" --save_dir={args.save_dir}"
+
+    cmd = template.format(args=cmd_args)
 
     with open('tmp.slurm', 'w') as f:
         f.write(cmd)
