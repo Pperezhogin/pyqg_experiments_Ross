@@ -138,14 +138,14 @@ def generate_forcing_dataset(nx1=256, nx2=64, dt=3600., sampling_freq=1000, filt
 
     m1 = pyqg.QGModel(nx=nx1, **pyqg_kwargs)
     m2 = pyqg.QGModel(nx=nx2, **pyqg_kwargs)
-    m3 = pyqg.QGModel(nx=nx2, **pyqg_kwargs)
+    #m3 = pyqg.QGModel(nx=nx2, **pyqg_kwargs)
     
     # Ensure dissipation on the lower-res simulation matches that of high-res simulation
-    cphi = 0.65 * np.pi
-    wvx = np.sqrt((m3.k * m1.dx)**2. + (m3.l * m1.dy)**2.)
-    filtr = np.exp(-m3.filterfac*(wvx - cphi))
-    filtr[wvx <= cphi] = 1.
-    m3.filtr = filtr
+    #cphi = 0.65 * np.pi
+    #wvx = np.sqrt((m3.k * m1.dx)**2. + (m3.l * m1.dy)**2.)
+    #filtr = np.exp(-m3.filterfac*(wvx - cphi))
+    #filtr[wvx <= cphi] = 1.
+    #m3.filtr = filtr
 
     # Set the diagnostics of the coarse simulation to be those of the hi-res
     # simulation, but downscaled
@@ -168,30 +168,52 @@ def generate_forcing_dataset(nx1=256, nx2=64, dt=3600., sampling_freq=1000, filt
             ds1 = m1.to_dataset().copy(deep=True)
             ds1_downscaled = downscaled(ds1)
             m2.set_q1q2(*ds1_downscaled.q.isel(time=0).copy().data)
-            m3.set_q1q2(*ds1_downscaled.q.isel(time=0).copy().data)
+            #m3.set_q1q2(*ds1_downscaled.q.isel(time=0).copy().data)
             ds2 = m2.to_dataset().copy(deep=True)
+
             ds2['q_forcing_advection'] = (
-                downscaled(advected(ds1, 'q')) -
-                advected(ds1_downscaled, 'q')
+                advected(ds1_downscaled, 'q') -
+                downscaled(advected(ds1, 'q'))
             )
+            ds2['u_forcing_advection'] = (
+                advected(ds1_downscaled, 'ufull') -
+                downscaled(advected(ds1, 'ufull'))
+            )
+            ds2['v_forcing_advection'] = (
+                advected(ds1_downscaled, 'vfull') -
+                downscaled(advected(ds1, 'vfull'))
+            )
+
             m1._step_forward()
             m2._step_forward()
-            m3._step_forward()
-            q_post = downscaled(m1.to_dataset()).q.isel(time=0).data
-            ds2['q_forcing_diff_dissipation'] = xr.DataArray(
-                np.expand_dims(m2.q - q_post, 0) / dt,
+            #m3._step_forward()
+
+            ds1_downscaled2 = downscaled(m1.to_dataset()).isel(time=0)
+            q_post = ds1_downscaled2.q.data
+            u_post = ds1_downscaled2.ufull.data
+            v_post = ds1_downscaled2.vfull.data
+
+            ds2['q_forcing_model'] = xr.DataArray(
+                np.expand_dims(m2.q - q_post, 0),
                 coords=[ds2.coords[d] for d in ds2.q.coords]
             )
-            ds2['q_forcing_same_dissipation'] = xr.DataArray(
-                np.expand_dims(m3.q - q_post, 0) / dt,
+
+            ds2['u_forcing_model'] = xr.DataArray(
+                np.expand_dims(m2.ufull - u_post, 0),
                 coords=[ds2.coords[d] for d in ds2.q.coords]
             )
+
+            ds2['v_forcing_model'] = xr.DataArray(
+                np.expand_dims(m2.vfull - v_post, 0),
+                coords=[ds2.coords[d] for d in ds2.q.coords]
+            )
+
             datasets1.append(ds1)
             datasets2.append(ds2)
         else:
             m1._step_forward()
             m2._step_forward()
-            m3._step_forward()
+            #m3._step_forward()
     
     d1 = xr.concat(datasets1, dim='time')
     d2 = xr.concat(datasets2, dim='time')

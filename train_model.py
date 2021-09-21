@@ -44,9 +44,12 @@ for z in range(2):
     ])
 
     Y = np.vstack([
-      [ds.isel(run=i,lev=z)[args.target].data]
+      np.swapaxes(np.array([
+        ds.isel(run=i,lev=z)[targ].data
+        for targ in args.target.split(",")
+      ]),0,1)  
       for i in range(len(ds.coords['run']))
-    ]).reshape(-1,1,64,64)
+    ])
 
     X_train = X[:cutoff]
     Y_train = Y[:cutoff]
@@ -103,7 +106,11 @@ for i in range(len(ds.run)):
             ds.isel(run=i,lev=z)[inp].data
             for inp in args.inputs.split(",")
         ]),0,1)  
-        y = np.array(ds.isel(run=i,lev=z)[args.target].data)[:,np.newaxis,:,:]
+
+        y = np.swapaxes(np.array([
+            ds.isel(run=i,lev=z)[targ].data
+            for targ in args.target.split(",")
+        ]),0,1)  
         yhat = models[z].predict(x, device=device)
         z_preds.append(yhat)
         z_corrs.append([pearsonr(yi.reshape(-1), yhi.reshape(-1))[0] for yi, yhi in zip(y, yhat)])
