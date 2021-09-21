@@ -1,6 +1,6 @@
 import os
 import matplotlib
-if os.path.exists('/scratch'):
+if 'USE_AGG' in os.environ:
     matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
