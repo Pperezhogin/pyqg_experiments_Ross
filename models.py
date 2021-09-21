@@ -39,13 +39,6 @@ def train(net, inputs, targets, num_epochs=50, batch_size=64, learning_rate=0.00
         scheduler.step()
 
 class ScaledModel(object):
-    def forward(self, x):
-        r = super().forward(x)
-        if self.is_zero_mean:
-            return r - r.mean(dim=(1,2,3), keepdim=True)
-        else:
-            return r
-
     @property
     def is_zero_mean(self):
         return hasattr(self, 'zero_mean') and getattr(self, 'zero_mean')
@@ -142,7 +135,7 @@ class BasicCNN(nn.Sequential, ScaledModel):
         ]))
 
 class FullyCNN(nn.Sequential, ScaledModel):
-    def __init__(self, n_in: int = 3, n_out: int = 1, padding='same', batch_norm=True):
+    def __init__(self, n_in: int = 3, n_out: int = 1, padding='same', batch_norm=True, zero_mean=False):
         if padding is None:
             padding_5 = 0
             padding_3 = 0
@@ -163,7 +156,15 @@ class FullyCNN(nn.Sequential, ScaledModel):
         conv8 = nn.Conv2d(32, n_out, 3, padding=padding_3)
         super().__init__(*block1, *block2, *block3, *block4, *block5,
                             *block6, *block7, conv8)
+        self.set_zero_mean(zero_mean)
 
+    def forward(self, x):
+        r = super().forward(x)
+        if self.is_zero_mean:
+            return r - r.mean(dim=(1,2,3), keepdim=True)
+        else:
+            return r
+        
     def _make_subblock(self, conv):
         subbloc = [conv, nn.ReLU()]
         if self.batch_norm:
