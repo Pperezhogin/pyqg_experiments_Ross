@@ -52,21 +52,29 @@ def generate_parameterized_dataset(cnn0, cnn1, inputs, **kwargs):
             cnn0.predict(get_inputs(m,0), device=device)[0,0],
             cnn1.predict(get_inputs(m,1), device=device)[0,0]
         ]).astype(m.q.dtype)
-        return dq
+        return -dq
 
     return generate_control_dataset(q_parameterization=q_parameterization, **kwargs)
 
-def generate_parameterized_dataset2(cnn0, cnn1, inputs, nx=64, dt=3600., **kwargs):
+def generate_parameterized_dataset2(cnn0, cnn1, inputs, sampling_freq=1000, nx=64, dt=3600., **kwargs):
+    import torch
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    cnn0.to(device)
+    cnn1.to(device)
+
     def get_inputs(m,z):
         return np.array([[
             getattr(m,inp)[z]
             for inp in inputs.split(",")
         ]]).astype(np.float32)
+    
+    def center(x):
+        return x - x.mean()
 
     def q_parameterization(m):
         dq = np.array([
-            cnn0.predict(get_inputs(m,0))[0,0],
-            cnn1.predict(get_inputs(m,1))[0,0]
+            center(-cnn0.predict(get_inputs(m,0), device=device)[0,0]),
+            center(-cnn1.predict(get_inputs(m,1), device=device)[0,0])
         ]).astype(m.q.dtype)
         return dq
 
@@ -123,7 +131,7 @@ def generate_control_dataset(nx=64, dt=3600., sampling_freq=1000, **kwargs):
 
     return d
 
-def generate_forcing_dataset(nx1=256, nx2=64, dt=3600., sampling_freq=1000, filter=None, **kwargs):
+def generate_forcing_dataset(nx1=256, nx2=64, dt=3600., sampling_freq=1000, sampling_dist='uniform', filter=None, **kwargs):
     scale = nx1//nx2
     
     year = 24*60*60*360.
@@ -163,8 +171,18 @@ def generate_forcing_dataset(nx1=256, nx2=64, dt=3600., sampling_freq=1000, filt
     datasets1 = []
     datasets2 = []
 
+    if sampling_dist == 'exponential':
+        next_sample = int(np.random.exponential(sampling_freq))
+
     while m1.t < m1.tmax:
-        if m1.tc % sampling_freq == 0:
+        if sampling_dist == 'exponential':
+            should_sample = m1.tc >= next_sample
+            if should_sample:
+                next_sample = m1.tc + int(np.random.exponential(sampling_freq))
+        else:
+            should_sample = (m1.tc % sampling_freq == 0)
+
+        if should_sample:
             ds1 = m1.to_dataset().copy(deep=True)
             ds1_downscaled = downscaled(ds1)
             m2.set_q1q2(*ds1_downscaled.q.isel(time=0).copy().data)
@@ -293,9 +311,10 @@ if __name__ == '__main__':
     parser.add_argument('--run_idx', type=int)
     parser.add_argument('--control', type=int, default=0)
     parser.add_argument('--sampling_freq', type=int, default=1000)
+    parser.add_argument('--sampling_dist', type=str, default='uniform')
     args, extra = parser.parse_known_args()
 
-    kwargs = dict(sampling_freq=args.sampling_freq, data_dir=args.data_dir)
+    kwargs = dict(sampling_freq=args.sampling_freq, data_dir=args.data_dir, sampling_dist=args.sampling_dist)
     for param in extra:
         key, val = param.split('=')
         kwargs[key.replace('--', '')] = float(val)

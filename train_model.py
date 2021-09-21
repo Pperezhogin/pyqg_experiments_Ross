@@ -3,25 +3,25 @@ import numpy as np
 from scipy.stats import pearsonr
 import os
 import sys
+import json
 sys.path.append('.')
 from models import *
 
 import argparse
 parser = argparse.ArgumentParser()
-parser.add_argument('--data_dir', type=str, default="/scratch/zanna/data/pyqg/pyqg_runs")
-parser.add_argument('--save_dir', type=str, default='')
+parser.add_argument('--data_dir', type=str, default="/scratch/zanna/data/pyqg/runs")
+parser.add_argument('--save_dir', type=str)
 parser.add_argument('--inputs', type=str, default="u,v,q")
 parser.add_argument('--target', type=str, default="q_forcing_advection")
 parser.add_argument('--model', type=str, default="fully_cnn")
+parser.add_argument('--normalize_loss', type=int, default=0)
 parser.add_argument('--zero_mean', type=int, default=1)
 args = parser.parse_args()
 
-if len(args.save_dir):
-    save_dir = args.save_dir
-else:
-    save_dir = f"{args.data_dir}/{args.model}_{args.target}"
-
 os.system(f"mkdir -p {save_dir}") 
+
+with open(f"{save_dir}/model_config.json", 'w') as f:
+    f.write(json.dumps(args.__dict__))
 
 ds = xr.open_mfdataset(f"{args.data_dir}/*/lores.nc", combine="nested", concat_dim="run")
 
@@ -83,7 +83,7 @@ for z in range(2):
     if args.zero_mean:
         model.set_zero_mean(True)
     model.set_scales(X_scale, Y_scale)
-    model.fit(X_train, Y_train, num_epochs=100, device=device)
+    model.fit(X_train, Y_train, num_epochs=100, device=device, normalize_loss=args.normalize_loss)
     print("Finished fitting")
 
     model_path = f"{save_dir}/model_z{z}"
@@ -106,7 +106,6 @@ for i in range(len(ds.run)):
             ds.isel(run=i,lev=z)[inp].data
             for inp in args.inputs.split(",")
         ]),0,1)  
-
         y = np.swapaxes(np.array([
             ds.isel(run=i,lev=z)[targ].data
             for targ in args.target.split(",")
