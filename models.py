@@ -18,7 +18,7 @@ def minibatch(inputs, targets, batch_size=64, as_tensor=True):
         y = xform(targets[idx])
         yield x, y
 
-def train(net, inputs, targets, num_epochs=50, batch_size=64, learning_rate=0.001, device=None):
+def train(net, inputs, targets, num_epochs=50, batch_size=64, learning_rate=0.001, normalize_loss=False, device=None):
     if device is None:
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     optimizer = optim.Adam(net.parameters(), lr=learning_rate)
@@ -30,7 +30,12 @@ def train(net, inputs, targets, num_epochs=50, batch_size=64, learning_rate=0.00
         for x, y in minibatch(inputs, targets, batch_size=batch_size):
             optimizer.zero_grad()
             yhat = net.forward(x.to(device))
-            loss = criterion(yhat, y.to(device))
+            ytrue = y.to(device)
+            if normalize_loss:
+                mu = y.reshape(-1, np.prod(targets.shape[1:])).mean(axis=1)
+                loss = criterion(yhat/mu, ytrue/mu)
+            else:
+                loss = criterion(yhat, ytrue)
             loss.backward()
             optimizer.step()
             epoch_loss += loss.item()
