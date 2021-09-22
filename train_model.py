@@ -4,57 +4,54 @@ from scipy.stats import pearsonr
 import os
 import sys
 import json
+import glob
 sys.path.append('.')
 from models import *
 
 import argparse
 parser = argparse.ArgumentParser()
-parser.add_argument('--data_dir', type=str, default="/scratch/zanna/data/pyqg/runs")
+parser.add_argument('--train_dir', type=str, default="/scratch/zanna/data/pyqg/64_256/train")
+parser.add_argument('--test_dir', type=str, default="/scratch/zanna/data/pyqg/64_256/test")
 parser.add_argument('--save_dir', type=str)
 parser.add_argument('--inputs', type=str, default="u,v,q")
 parser.add_argument('--target', type=str, default="q_forcing_advection")
-parser.add_argument('--model', type=str, default="fully_cnn")
 parser.add_argument('--normalize_loss', type=int, default=0)
 parser.add_argument('--zero_mean', type=int, default=1)
 args = parser.parse_args()
 
+save_dir = args.save_dir
 os.system(f"mkdir -p {save_dir}") 
 
 with open(f"{save_dir}/model_config.json", 'w') as f:
     f.write(json.dumps(args.__dict__))
 
-ds = xr.open_mfdataset(f"{args.data_dir}/*/lores.nc", combine="nested", concat_dim="run")
+train_files = sorted(glob.glob(f"{args.train_dir}/*/lores.nc"))
+train_datasets = [xr.open_dataset(f) for f in train_files]
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 models = []
 
-run_length = len(ds.isel(run=0).time)
-run_count = len(ds.run)
-cutoff = int(run_count * (3/4)) * run_length
+def extract_vars(qtys, datasets, z):
+    return np.vstack([
+      np.swapaxes(np.array([
+        ds.isel(lev=z)[qty].data
+        for qty in qtys
+      ]),0,1)  
+      for ds in datasets
+    ])
+
+def extract_xy(datasets, z):
+    x = extract_vars(args.inputs.split(","), datasets, z)
+    y = extract_vars(args.target.split(","), datasets, z)
+    return x, y
 
 for z in range(2):
     print(f"z={z}")
-    X = np.vstack([
-      np.swapaxes(np.array([
-        ds.isel(run=i,lev=z)[inp].data
-        for inp in args.inputs.split(",")
-      ]),0,1)  
-      for i in range(len(ds.coords['run']))
-    ])
+    
+    X_train, Y_train = extract_xy(train_datasets, z)
 
-    Y = np.vstack([
-      np.swapaxes(np.array([
-        ds.isel(run=i,lev=z)[targ].data
-        for targ in args.target.split(",")
-      ]),0,1)  
-      for i in range(len(ds.coords['run']))
-    ])
-
-    X_train = X[:cutoff]
-    Y_train = Y[:cutoff]
-    X_test = X[cutoff:]
-    Y_test = Y[cutoff:]
+    print("Extracted datasets")
 
     X_scale = BasicScaler(
         mu=np.array([
@@ -71,18 +68,15 @@ for z in range(2):
     else:
         Y_scale = BasicScaler(Y_train.mean(), Y_train.std())
 
-    if args.model == 'basic_cnn':
-        model = BasicCNN(X_train.shape[1:], Y_train.shape[1:])
-    elif args.model == 'fully_cnn':
-        model = FullyCNN(X_train.shape[1], Y_train.shape[1])
-    else:
-        assert False
+    print("Computed scales")
 
+    model = FullyCNN(X_train.shape[1], Y_train.shape[1])
     model.to(device)
-
     if args.zero_mean:
         model.set_zero_mean(True)
     model.set_scales(X_scale, Y_scale)
+
+    print("Starting fitting")
     model.fit(X_train, Y_train, num_epochs=100, device=device, normalize_loss=args.normalize_loss)
     print("Finished fitting")
 
@@ -94,42 +88,36 @@ for z in range(2):
 
     models.append(model)
 
-preds = []
-corrs = []
-mses = []
-for i in range(len(ds.run)):
-    z_preds = []
-    z_corrs = []
-    z_mses = []
+for f in glob.glob(f"{args.test_dir}/*/lores.nc"):
+    ds = xr.open_dataset(f)
+    run_idx = f.split("/")[-2]
+
+    preds = []
+    corrs = []
+    mses = []
     for z in range(2):
-        x = np.swapaxes(np.array([
-            ds.isel(run=i,lev=z)[inp].data
-            for inp in args.inputs.split(",")
-        ]),0,1)  
-        y = np.swapaxes(np.array([
-            ds.isel(run=i,lev=z)[targ].data
-            for targ in args.target.split(",")
-        ]),0,1)  
+        x, y = extract_xy([ds], z)
         yhat = models[z].predict(x, device=device)
-        z_preds.append(yhat)
-        z_corrs.append([pearsonr(yi.reshape(-1), yhi.reshape(-1))[0] for yi, yhi in zip(y, yhat)])
-        z_mses.append([np.sum((yi-yhi)**2) for yi, yhi in zip(y, yhat)])
-    preds.append(z_preds)
-    corrs.append(z_corrs)
-    mses.append(z_mses)
-preds = np.array(preds)
-corrs = np.array(corrs)
-mses = np.array(mses)
+        preds.append(yhat)
+        corrs.append([pearsonr(yi.reshape(-1), yhi.reshape(-1))[0] for yi, yhi in zip(y, yhat)])
+        mses.append([np.sum((yi-yhi)**2) for yi, yhi in zip(y, yhat)])
+    preds = np.array(preds)
+    corrs = np.array(corrs)
+    mses = np.array(mses)
 
-dims = ['run','lev','time','y','x']
-coords = {}
-for d in dims:
-    coords[d] = ds[d]
+    def coord_kwargs(*dims):
+        coords = {}
+        for d in dims:
+            coords[d] = ds[d]
+        return dict(coords=coords, dims=dims)
+    
+    os.system(f"mkdir -p {save_dir}/test/{run_idx}")
 
-preds_ds = xr.Dataset(data_vars=dict(
-    predictions=xr.DataArray(preds[:,:,:,0,:,:], coords=coords, dims=dims, attrs=dict(target=args.target)),
-    correlation=xr.DataArray(corrs, coords=dict(run=ds.run, lev=ds.lev, time=ds.time), dims=['run','lev','time']),
-    mean_sq_err=xr.DataArray(mses, coords=dict(run=ds.run, lev=ds.lev, time=ds.time), dims=['run','lev','time']),
-))
+    xr.Dataset(data_vars=dict(
+        predictions=xr.DataArray(preds[:,:,0,:,:],
+            attrs=dict(target=args.target)
+            **coord_kwargs('lev','time','y','x')),
+        correlation=xr.DataArray(corrs, **coord_kwargs('lev','time')),
+        mean_sq_err=xr.DataArray(mses, **coord_kwargs('lev','time')),
+    )).to_netcdf(f"{save_dir}/test/{run_idx}/preds.nc")
 
-preds_ds.to_netcdf(f"{save_dir}/predictions.nc")
