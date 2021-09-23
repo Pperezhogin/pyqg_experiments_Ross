@@ -53,38 +53,43 @@ for z in range(2):
 
     print("Extracted datasets")
 
-    X_scale = BasicScaler(
-        mu=np.array([
-            X_train[:,i].mean() for i,_ in enumerate(args.inputs.split(","))
-        ])[np.newaxis,:,np.newaxis,np.newaxis],
-
-        sd=np.array([
-            X_train[:,i].std() for i,_ in enumerate(args.inputs.split(","))
-        ])[np.newaxis,:,np.newaxis,np.newaxis]
-    )
-
-    if args.zero_mean:
-        Y_scale = BasicScaler(0, Y_train.std())
-    else:
-        Y_scale = BasicScaler(Y_train.mean(), Y_train.std())
-
-    print("Computed scales")
-
     model = FullyCNN(X_train.shape[1], Y_train.shape[1])
-    model.to(device)
-    if args.zero_mean:
-        model.set_zero_mean(True)
-    model.set_scales(X_scale, Y_scale)
-
-    print("Starting fitting")
-    model.fit(X_train, Y_train, num_epochs=100, device=device, normalize_loss=args.normalize_loss)
-    print("Finished fitting")
-
     model_path = f"{save_dir}/model_z{z}"
-    model.cpu()
-    model.save(model_path)
-    model.to(device)
-    print("Finished saving")
+
+    if os.path.exists(model_path):
+        model.load(model_path)
+        model.to(device)
+    else:
+        model.to(device)
+        X_scale = BasicScaler(
+            mu=np.array([
+                X_train[:,i].mean() for i,_ in enumerate(args.inputs.split(","))
+            ])[np.newaxis,:,np.newaxis,np.newaxis],
+
+            sd=np.array([
+                X_train[:,i].std() for i,_ in enumerate(args.inputs.split(","))
+            ])[np.newaxis,:,np.newaxis,np.newaxis]
+        )
+
+        if args.zero_mean:
+            Y_scale = BasicScaler(0, Y_train.std())
+        else:
+            Y_scale = BasicScaler(Y_train.mean(), Y_train.std())
+
+        print("Computed scales")
+
+        if args.zero_mean:
+            model.set_zero_mean(True)
+        model.set_scales(X_scale, Y_scale)
+
+        print("Starting fitting")
+        model.fit(X_train, Y_train, num_epochs=100, device=device, normalize_loss=args.normalize_loss)
+        print("Finished fitting")
+
+        model.cpu()
+        model.save(model_path)
+        model.to(device)
+        print("Finished saving")
 
     models.append(model)
 
@@ -115,7 +120,7 @@ for f in glob.glob(f"{args.test_dir}/*/lores.nc"):
 
     xr.Dataset(data_vars=dict(
         predictions=xr.DataArray(preds[:,:,0,:,:],
-            attrs=dict(target=args.target)
+            attrs=dict(target=args.target),
             **coord_kwargs('lev','time','y','x')),
         correlation=xr.DataArray(corrs, **coord_kwargs('lev','time')),
         mean_sq_err=xr.DataArray(mses, **coord_kwargs('lev','time')),
