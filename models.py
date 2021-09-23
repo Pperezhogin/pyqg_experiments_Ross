@@ -18,7 +18,8 @@ def minibatch(inputs, targets, batch_size=64, as_tensor=True):
         y = xform(targets[idx])
         yield x, y
 
-def train(net, inputs, targets, num_epochs=50, batch_size=64, learning_rate=0.001, l1_grads=0, n_grads=1, device=None):
+def train(net, inputs, targets, num_epochs=50, batch_size=64, learning_rate=0.001, l1_grads=0, n_grads=1,
+        mask_grads=False, grad_radius=6, device=None):
     if device is None:
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     optimizer = optim.Adam(net.parameters(), lr=learning_rate)
@@ -46,7 +47,17 @@ def train(net, inputs, targets, num_epochs=50, batch_size=64, learning_rate=0.00
                     j = np.random.choice(yhat.shape[2])
                     k = np.random.choice(yhat.shape[3])
                     dyhat_dxs = torch.autograd.grad(yhat[:,i,j,k].sum(), x, create_graph=True)[0]
-                    grad_loss += l1_grads * dyhat_dxs.abs().sum()
+                    if mask_grads:
+                        mask = np.array([[
+                            int(np.abs(j-j2) > grad_radius) *
+                            int(np.abs(k-k2) > grad_radius)
+                            for j2 in range(yhat.shape[2])]
+                            for k2 in range(yhat.shape[3])])
+                        mask = mask[np.newaxis, np.newaxis, :, :]
+                        mask = torch.tensor(mask)
+                        grad_loss += l1_grads * (dyhat_dxs * mask).abs().sum()
+                    else:
+                        grad_loss += l1_grads * dyhat_dxs.abs().sum()
 
             loss = mse_loss + grad_loss
             loss.backward()
