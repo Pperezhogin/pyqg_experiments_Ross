@@ -18,7 +18,7 @@ def minibatch(inputs, targets, batch_size=64, as_tensor=True):
         y = xform(targets[idx])
         yield x, y
 
-def train(net, inputs, targets, num_epochs=50, batch_size=64, learning_rate=0.001, normalize_loss=False, device=None):
+def train(net, inputs, targets, num_epochs=50, batch_size=64, learning_rate=0.001, l1_grads=0, n_grads=10, device=None):
     if device is None:
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     optimizer = optim.Adam(net.parameters(), lr=learning_rate)
@@ -29,17 +29,28 @@ def train(net, inputs, targets, num_epochs=50, batch_size=64, learning_rate=0.00
         epoch_steps = 0
         for x, y in minibatch(inputs, targets, batch_size=batch_size):
             optimizer.zero_grad()
+
+            if l1_grads > 0:
+                x = x.requires_grad_()
+
             yhat = net.forward(x.to(device))
+
             ytrue = y.to(device)
-            if normalize_loss:
-                mu_shape = [-1] + [1 for _ in targets.shape[1:]]
-                mu = (
-                        torch.abs(y.reshape(-1, np.prod(targets.shape[1:]))) 
-                    ).mean(axis=1).reshape(mu_shape).to(device)
-                loss = criterion(yhat/mu, ytrue/mu)
-            else:
-                loss = criterion(yhat, ytrue)
+
+            loss = criterion(yhat, ytrue)
+
+            if l1_grads > 0:
+                for _ in range(n_grads):
+                    i = np.random.choice(yhat.shape[1])
+                    j = np.random.choice(yhat.shape[2])
+                    k = np.random.choice(yhat.shape[3])
+                    dyhat_dxs = torch.autograd.grad(yhat[:,i,j,k].sum(), x, create_graph=True)
+                    loss_term = l1_grads * dyhat_dxs.abs().sum()
+                    print(loss_term)
+                    loss += loss_term
+
             loss.backward()
+
             optimizer.step()
             epoch_loss += loss.item()
             epoch_steps += 1
