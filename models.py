@@ -33,7 +33,9 @@ def train(net, inputs, targets, num_epochs=50, batch_size=64, learning_rate=0.00
             ytrue = y.to(device)
             if normalize_loss:
                 mu_shape = [-1] + [1 for _ in targets.shape[1:]]
-                mu = (y.reshape(-1, np.prod(targets.shape[1:]))**2).mean(axis=1).reshape(mu_shape).to(device)
+                mu = (
+                        torch.abs(y.reshape(-1, np.prod(targets.shape[1:]))) 
+                    ).mean(axis=1).reshape(mu_shape).to(device)
                 loss = criterion(yhat/mu, ytrue/mu)
             else:
                 loss = criterion(yhat, ytrue)
