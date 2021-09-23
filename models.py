@@ -18,7 +18,7 @@ def minibatch(inputs, targets, batch_size=64, as_tensor=True):
         y = xform(targets[idx])
         yield x, y
 
-def train(net, inputs, targets, num_epochs=50, batch_size=64, learning_rate=0.001, l1_grads=0, n_grads=10, device=None):
+def train(net, inputs, targets, num_epochs=50, batch_size=64, learning_rate=0.001, l1_grads=0, n_grads=1, device=None):
     if device is None:
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     optimizer = optim.Adam(net.parameters(), lr=learning_rate)
@@ -37,22 +37,24 @@ def train(net, inputs, targets, num_epochs=50, batch_size=64, learning_rate=0.00
 
             ytrue = y.to(device)
 
-            loss = criterion(yhat, ytrue)
+            mse_loss = criterion(yhat, ytrue)
+            grad_loss = 0
 
             if l1_grads > 0:
                 for _ in range(n_grads):
                     i = np.random.choice(yhat.shape[1])
                     j = np.random.choice(yhat.shape[2])
                     k = np.random.choice(yhat.shape[3])
-                    dyhat_dxs = torch.autograd.grad(yhat[:,i,j,k].sum(), x, create_graph=True)
-                    loss_term = l1_grads * dyhat_dxs.abs().sum()
-                    print(loss_term)
-                    loss += loss_term
+                    dyhat_dxs = torch.autograd.grad(yhat[:,i,j,k].sum(), x, create_graph=True)[0]
+                    grad_loss += l1_grads * dyhat_dxs.abs().sum()
 
+            loss = mse_loss + grad_loss
             loss.backward()
-
             optimizer.step()
             epoch_loss += loss.item()
+
+            if epoch_steps % 10 == 0:
+                print(f"MSE: {mse_loss:.2e}, grads: {grad_loss:.2e}")
             epoch_steps += 1
         print(f"Loss after Epoch {epoch+1}: {epoch_loss/epoch_steps}")
         scheduler.step()
