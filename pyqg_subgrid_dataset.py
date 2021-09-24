@@ -35,6 +35,44 @@ def advected(ds, quantity='q'):
     # Return the advected quantity
     return ds.ufull * dq_dx +  ds.vfull * dq_dy
 
+def zb2020_uv_parameterization(m, factors=np.array([-19723861.3, -32358493.6])):
+    ds = m.to_dataset().isel(time=-1)
+
+    ds['relative_vorticity'] = (
+        ds.v.differentiate('x') - ds.u.differentiate('y')
+    )
+    ds['shearing_deformation'] = (
+        ds.u.differentiate('y') + ds.v.differentiate('x')
+    )
+    ds['stretching_deformation'] = (
+        ds.u.differentiate('x') - ds.v.differentiate('y')
+    )
+
+    du = factors[:,np.newaxis,np.newaxis] * (
+        (-ds.relative_vorticity*ds.shearing_deformation).differentiate('x')
+        + (ds.relative_vorticity*ds.stretching_deformation).differentiate('y')
+        + 0.5*(
+            ds.relative_vorticity**2
+            + ds.shearing_deformation**2
+            + ds.stretching_deformation**2
+        ).differentiate('x')  
+    )
+
+    dv = factors[:,np.newaxis,np.newaxis] * (
+          (ds.relative_vorticity*ds.shearing_deformation).differentiate('y')
+        + (ds.relative_vorticity*ds.stretching_deformation).differentiate('x')
+        + 0.5*(
+            ds.relative_vorticity**2
+            + ds.shearing_deformation**2
+            + ds.stretching_deformation**2
+        ).differentiate('y')  
+    )
+
+    return np.array(du.data), np.array(dv.data)
+
+def generate_physically_parameterized_dataset(**kwargs):
+    return generate_control_dataset(uv_parameterization=zb2020_uv_parameterization, **kwargs)
+
 def generate_parameterized_dataset(cnn0, cnn1, inputs, divide_by_dt=False, **kwargs):
     import torch
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -57,16 +95,6 @@ def generate_parameterized_dataset(cnn0, cnn1, inputs, divide_by_dt=False, **kwa
         return dq
 
     return generate_control_dataset(q_parameterization=q_parameterization, **kwargs)
-
-    """
-    if divide_by_dt:
-        def after_each(m):
-            dq = q_parameterization(m)
-            m.set_q1q2(*(m.q - dq))
-        return generate_control_dataset(after_each=after_each, **kwargs)
-    else:
-        return generate_control_dataset(q_parameterization=q_parameterization, **kwargs)
-    """
 
 def generate_control_dataset(nx=64, dt=3600., sampling_freq=1000, sampling_dist='uniform', after_each=None, **kwargs):
     year = 24*60*60*360.
@@ -250,6 +278,18 @@ class PYQGSubgridDataset(object):
     def load(self, key, **kw):
         return xr.open_mfdataset(f"{self.pyqg_run_dir}/*/{key}.nc", combine="nested", concat_dim="run", **kw)
 
+    def execute_physical_run(self, i):
+        config = Struct(**self.config)
+        simulation_dir = os.path.join(self.pyqg_run_dir, str(i))
+        os.system(f"mkdir -p {simulation_dir}")
+        ds = generate_physically_parameterized_dataset(
+                sampling_freq=config.sampling_freq,
+                sampling_dist=config.sampling_dist,
+                **config.pyqg_kwargs)
+        complex_vars = [k for k,v in ds.variables.items() if v.dtype == np.complex128]
+        ds = ds.drop(complex_vars)
+        ds.to_netcdf(os.path.join(simulation_dir, 'physical.nc'))
+
     def execute_control_run(self, i):
         config = Struct(**self.config)
         simulation_dir = os.path.join(self.pyqg_run_dir, str(i))
@@ -282,6 +322,7 @@ if __name__ == '__main__':
     parser.add_argument('--data_dir', type=str)
     parser.add_argument('--run_idx', type=int)
     parser.add_argument('--control', type=int, default=0)
+    parser.add_argument('--physical', type=int, default=0)
     parser.add_argument('--sampling_freq', type=int, default=1000)
     parser.add_argument('--sampling_dist', type=str, default='uniform')
     args, extra = parser.parse_known_args()
@@ -297,5 +338,7 @@ if __name__ == '__main__':
     ds = PYQGSubgridDataset(**kwargs)
     if control:
         ds.execute_control_run(idx)
+    elif args.physical:
+        ds.execute_physical_run(idx)
     else:
         ds.execute_forcing_run(idx)
