@@ -18,6 +18,9 @@ parser.add_argument('--target', type=str, default="q_forcing_advection")
 parser.add_argument('--normalize_loss', type=int, default=0)
 parser.add_argument('--zero_mean', type=int, default=1)
 parser.add_argument('--l1_grads', type=float, default=0)
+parser.add_argument('--mask_grads', type=int, default=0)
+parser.add_argument('--grad_radius', type=int, default=6)
+parser.add_argument('--num_epochs', type=int, default=100)
 args = parser.parse_args()
 
 save_dir = args.save_dir
@@ -85,8 +88,10 @@ for z in range(2):
 
         print("Starting fitting")
         model.fit(X_train, Y_train,
-                num_epochs=100,
+                num_epochs=args.num_epochs,
                 device=device,
+                mask_grads=args.mask_grads,
+                grad_radius=args.grad_radius,
                 #normalize_loss=args.normalize_loss,
                 l1_grads=args.l1_grads)
         print("Finished fitting")

@@ -35,7 +35,7 @@ def advected(ds, quantity='q'):
     # Return the advected quantity
     return ds.ufull * dq_dx +  ds.vfull * dq_dy
 
-def generate_parameterized_dataset(cnn0, cnn1, inputs, **kwargs):
+def generate_parameterized_dataset(cnn0, cnn1, inputs, divide_by_dt=False, **kwargs):
     import torch
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     cnn0.to(device)
@@ -52,60 +52,23 @@ def generate_parameterized_dataset(cnn0, cnn1, inputs, **kwargs):
             cnn0.predict(get_inputs(m,0), device=device)[0,0],
             cnn1.predict(get_inputs(m,1), device=device)[0,0]
         ]).astype(m.q.dtype)
-        return -dq
+        if divide_by_dt:
+            dq = dq / kwargs.get('dt', 3600.)
+        return dq
 
     return generate_control_dataset(q_parameterization=q_parameterization, **kwargs)
 
-def generate_parameterized_dataset2(cnn0, cnn1, inputs, sampling_freq=1000, nx=64, dt=3600., **kwargs):
-    import torch
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    cnn0.to(device)
-    cnn1.to(device)
+    """
+    if divide_by_dt:
+        def after_each(m):
+            dq = q_parameterization(m)
+            m.set_q1q2(*(m.q - dq))
+        return generate_control_dataset(after_each=after_each, **kwargs)
+    else:
+        return generate_control_dataset(q_parameterization=q_parameterization, **kwargs)
+    """
 
-    def get_inputs(m,z):
-        return np.array([[
-            getattr(m,inp)[z]
-            for inp in inputs.split(",")
-        ]]).astype(np.float32)
-    
-    def center(x):
-        return x - x.mean()
-
-    def q_parameterization(m):
-        dq = np.array([
-            center(-cnn0.predict(get_inputs(m,0), device=device)[0,0]),
-            center(-cnn1.predict(get_inputs(m,1), device=device)[0,0])
-        ]).astype(m.q.dtype)
-        return dq
-
-    year = 24*60*60*360.
-    pyqg_kwargs = dict(tmax=5*year, tavestart=2.5*year, dt=dt)
-    pyqg_kwargs.update(**kwargs)
-
-    m = pyqg.QGModel(nx=nx, **pyqg_kwargs)
-    datasets = []
-
-    while m.t < m.tmax:
-        dq = q_parameterization(m) * dt
-        if m.tc % sampling_freq == 0:
-            ds = m.to_dataset().copy(deep=True)
-            datasets.append(ds)
-        m._step_forward()
-        m.set_q1q2(*(m.q + dq))
-
-    d = xr.concat(datasets, dim='time')
-    
-    for k,v in datasets[-1].variables.items():
-        if k not in d:
-            d[k] = v.isel(time=-1)
-
-    for k,v in d.variables.items():
-        if v.dtype == np.float64:
-            d[k] = v.astype(np.float32)
-
-    return d
-
-def generate_control_dataset(nx=64, dt=3600., sampling_freq=1000, sampling_dist='uniform', **kwargs):
+def generate_control_dataset(nx=64, dt=3600., sampling_freq=1000, sampling_dist='uniform', after_each=None, **kwargs):
     year = 24*60*60*360.
     pyqg_kwargs = dict(tmax=5*year, tavestart=2.5*year, dt=dt)
     pyqg_kwargs.update(**kwargs)
@@ -118,6 +81,8 @@ def generate_control_dataset(nx=64, dt=3600., sampling_freq=1000, sampling_dist=
             ds = m.to_dataset().copy(deep=True)
             datasets.append(ds)
         m._step_forward()
+        if after_each is not None:
+            after_each(m)
 
     d = xr.concat(datasets, dim='time')
     

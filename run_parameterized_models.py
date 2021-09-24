@@ -5,7 +5,7 @@ template = """#!/bin/bash
 #SBATCH --cpus-per-task=1
 #SBATCH --time=01:00:00
 #SBATCH --mem=32GB
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:rtx8000:1
 #SBATCH --job-name=generate_datasets
 #SBATCH --mail-type=END
 #SBATCH --mail-user=asross@nyu.edu
@@ -18,23 +18,17 @@ singularity exec --nv --overlay /scratch/asr9645/envs/m2lines.ext3:ro /scratch/w
 import os
 import argparse
 parser = argparse.ArgumentParser()
+parser.add_argument('--save_dir', type=str)
 parser.add_argument('--inputs', type=str, default="u,v,q")
-parser.add_argument('--target', type=str, default="q_forcing_advection")
-parser.add_argument('--model', type=str, default="fully_cnn")
-parser.add_argument('--save_dir', type=str, default="")
 parser.add_argument('--n_runs', type=int, default=16)
 parser.add_argument('--start_idx', type=int, default=0)
+parser.add_argument('--divide_by_dt', action='store_true', default=False)
 args = parser.parse_args()
 
 for i in range(args.n_runs):
-    cmd_args = "--model={model} --inputs={inputs} --target={target} --run_idx={idx}".format(
-        inputs=args.inputs,
-        target=args.target,
-        model=args.model,
-        idx=i + args.start_idx,
-    )
-    if len(args.save_dir):
-        cmd_args += f" --save_dir={args.save_dir}"
+    cmd_args = f"--inputs={args.inputs} --run_idx={i + args.start_idx} --save_dir={args.save_dir}"
+    if args.divide_by_dt:
+        cmd_args += " --divide_by_dt"
 
     cmd = template.format(args=cmd_args)
 
