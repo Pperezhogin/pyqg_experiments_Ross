@@ -5,6 +5,7 @@ import torch.optim as optim
 import pickle
 import numpy as np
 from collections import OrderedDict
+from sklearn.isotonic import IsotonicRegression
 
 def minibatch(inputs, targets, batch_size=64, as_tensor=True):
     assert len(inputs) == len(targets)
@@ -141,6 +142,52 @@ class BasicScaler(object):
     
     def inverse_transform(self, z):
         return z * self.sd + self.mu
+
+class ScalerBase():
+    def __init__(self, x=None, eps=1e-16):
+        self.eps = eps
+        if x is not None:
+            self.fit(x)
+
+    def fit(self, x):
+        self.fit_transform(x)
+        return self
+    
+class UnivariateLogPowScaler(ScalerBase):
+    def fit_transform(self, x_):
+        x = x_.reshape(len(x_), -1) 
+        x_sd = np.std(x, axis=1) + self.eps
+        log_x_sd = np.log(x_sd)
+        self.max_log_x_sd = log_x_sd.max()
+        x_prime = x / (x_sd * (1 + self.max_log_x_sd - log_x_sd))[:,np.newaxis]
+        self.inverse_model = IsotonicRegression(out_of_bounds='clip')
+        self.inverse_model.fit(x_prime.std(axis=1).reshape(-1,1), log_x_sd)
+        return x_prime.reshape(x_.shape)
+    
+    def transform(self, x_):
+        x = x_.reshape(len(x_), -1) 
+        x_sd = np.std(x, axis=1) + self.eps
+        log_x_sd = np.log(x_sd)
+        x_prime = x / (x_sd * (1 + self.max_log_x_sd - log_x_sd))[:,np.newaxis]
+        return x_prime.reshape(x_.shape)
+    
+    def inverse_transform(self, x_):
+        x_prime = x_.reshape(len(x_), -1) 
+        log_x_sd = self.inverse_model.predict(x_prime.std(axis=1).reshape(-1,1))
+        x_sd = np.exp(log_x_sd)
+        x = x_prime * (x_sd * (1 + self.max_log_x_sd - log_x_sd))[:,np.newaxis]
+        return x.reshape(x_.shape)
+    
+class MultivariateLogPowScaler(ScalerBase):
+    def fit_transform(self, x):   
+        self.scalers = [UnivariateLogPowScaler(x[:,i]) for i in range(x.shape[1])]
+        return self.transform(x)
+    
+    def transform(self, x):
+        return np.stack([self.scalers[i].transform(x[:,i]) for i in range(x.shape[1])], axis=1)
+    
+    def inverse_transform(self, x):
+        return np.stack([self.scalers[i].inverse_transform(x[:,i]) for i in range(x.shape[1])], axis=1)
 
 class BasicCNN(nn.Sequential, ScaledModel):
     def __init__(self, input_shape, output_shape, pad='circular'):

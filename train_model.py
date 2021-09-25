@@ -21,6 +21,7 @@ parser.add_argument('--l1_grads', type=float, default=0)
 parser.add_argument('--mask_grads', type=int, default=0)
 parser.add_argument('--grad_radius', type=int, default=6)
 parser.add_argument('--num_epochs', type=int, default=100)
+parser.add_argument('--scaler', type=str, default='basic')
 args = parser.parse_args()
 
 save_dir = args.save_dir
@@ -65,20 +66,25 @@ for z in range(2):
         model.to(device)
     else:
         model.to(device)
-        X_scale = BasicScaler(
-            mu=np.array([
-                X_train[:,i].mean() for i,_ in enumerate(args.inputs.split(","))
-            ])[np.newaxis,:,np.newaxis,np.newaxis],
 
-            sd=np.array([
-                X_train[:,i].std() for i,_ in enumerate(args.inputs.split(","))
-            ])[np.newaxis,:,np.newaxis,np.newaxis]
-        )
-
-        if args.zero_mean:
-            Y_scale = BasicScaler(0, Y_train.std())
+        if args.scaler = 'logpow':
+            X_scale = MultivariateLogPowScaler(X_train)
+            Y_scale = MultivariateLogPowScaler(Y_train)
         else:
-            Y_scale = BasicScaler(Y_train.mean(), Y_train.std())
+            X_scale = BasicScaler(
+                mu=np.array([
+                    X_train[:,i].mean() for i,_ in enumerate(args.inputs.split(","))
+                ])[np.newaxis,:,np.newaxis,np.newaxis],
+
+                sd=np.array([
+                    X_train[:,i].std() for i,_ in enumerate(args.inputs.split(","))
+                ])[np.newaxis,:,np.newaxis,np.newaxis]
+            )
+
+            if args.zero_mean:
+                Y_scale = BasicScaler(0, Y_train.std())
+            else:
+                Y_scale = BasicScaler(Y_train.mean(), Y_train.std())
 
         print("Computed scales")
 
