@@ -325,12 +325,17 @@ if __name__ == '__main__':
     parser.add_argument('--physical', type=int, default=0)
     parser.add_argument('--sampling_freq', type=int, default=1000)
     parser.add_argument('--sampling_dist', type=str, default='uniform')
+    parser.add_argument('--transfer_test', type=int, default=0)
     args, extra = parser.parse_known_args()
 
     kwargs = dict(sampling_freq=args.sampling_freq, data_dir=args.data_dir, sampling_dist=args.sampling_dist)
     for param in extra:
         key, val = param.split('=')
         kwargs[key.replace('--', '')] = float(val)
+
+    if args.transfer_test:
+        kwargs.update(dict(rd=15625.0, beta=1.0e-11, delta=0.1,  L=2000000.0))
+
     idx = args.run_idx
     control = args.control
     print(args)

@@ -22,6 +22,7 @@ parser.add_argument('--mask_grads', type=int, default=0)
 parser.add_argument('--grad_radius', type=int, default=6)
 parser.add_argument('--num_epochs', type=int, default=100)
 parser.add_argument('--scaler', type=str, default='basic')
+parser.add_argument('--skip_datasets', type=int, default=0)
 args = parser.parse_args()
 
 save_dir = args.save_dir
@@ -31,7 +32,7 @@ with open(f"{save_dir}/model_config.json", 'w') as f:
     f.write(json.dumps(args.__dict__))
 
 train_files = sorted(glob.glob(f"{args.train_dir}/*/lores.nc"))
-train_datasets = [xr.open_dataset(f) for f in train_files]
+train_datasets = [xr.open_dataset(f) for f in train_files][args.skip_datasets:]
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -67,7 +68,7 @@ for z in range(2):
     else:
         model.to(device)
 
-        if args.scaler = 'logpow':
+        if args.scaler == 'logpow':
             X_scale = MultivariateLogPowScaler(X_train)
             Y_scale = MultivariateLogPowScaler(Y_train)
         else:
@@ -92,9 +93,13 @@ for z in range(2):
             model.set_zero_mean(True)
         model.set_scales(X_scale, Y_scale)
 
+        num_epochs = args.num_epochs
+        if args.skip_datasets > 0:
+            num_epochs = int(num_epochs * (len(train_files) / args.skip_datasets))
+
         print("Starting fitting")
         model.fit(X_train, Y_train,
-                num_epochs=args.num_epochs,
+                num_epochs=num_epochs,
                 device=device,
                 mask_grads=args.mask_grads,
                 grad_radius=args.grad_radius,
@@ -110,9 +115,10 @@ for z in range(2):
     models.append(model)
 
 for f in glob.glob(f"{args.test_dir}/*/lores.nc"):
-    ds = xr.open_dataset(f)
     run_idx = f.split("/")[-2]
+    if os.path.exists(f"{save_dir}/test/{run_idx}/preds.nc"): continue
 
+    ds = xr.open_dataset(f)
     preds = []
     corrs = []
     mses = []
@@ -142,3 +148,25 @@ for f in glob.glob(f"{args.test_dir}/*/lores.nc"):
         mean_sq_err=xr.DataArray(mses, **coord_kwargs('lev','time')),
     )).to_netcdf(f"{save_dir}/test/{run_idx}/preds.nc")
 
+from pyqg_subgrid_dataset import generate_parameterized_dataset
+
+year = 24*60*60*360.
+
+paramsets = [
+    dict(rd=15000.0, beta=1.5e-11, delta=0.25, L=1000000.0),
+    dict(rd=15625.0, beta=1.0e-11, delta=0.1,  L=2000000.0, tmax=20*year, tavestart=10*year)
+]
+
+cnn0, cnn1 = models
+
+for j, params in enumerate(paramsets):
+    run_dir = os.path.join(save_dir, "pyqg_runs/paramsets", str(j))
+    os.system(f"mkdir -p {run_dir}")
+
+    with open(f"{run_dir}/pyqg_params.json", 'w') as f:
+        f.write(json.dumps(params))
+
+    for i in range(4):
+        run = generate_parameterized_dataset(cnn0, cnn1, args.inputs, divide_by_dt=('forcing_model' in args.target), **params)
+        complex_vars = [k for k,v in run.variables.items() if v.dtype == np.complex128]
+        run.drop(complex_vars).to_netcdf(os.path.join(run_dir, f"{i}.nc"))
