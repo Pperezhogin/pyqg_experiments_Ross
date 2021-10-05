@@ -3,11 +3,13 @@ import matplotlib
 if 'USE_AGG' in os.environ:
     matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from matplotlib import animation
 import xarray as xr
 import numpy as np
 from scipy.stats import linregress
 from pyqg.errors import DiagnosticNotFilledError
 from pyqg.diagnostic_tools import calc_ispec
+from pyqg.particles import GriddedLagrangianParticleArray2D
 
 class AnimatedPlot():
     def __init__(self, ax, func):
@@ -72,6 +74,24 @@ class AnimatedSpectrum(AnimatedPlot):
         return res
         
 class AnimatedLine(AnimatedPlot):
+    def __init__(self, ax, func, logx=True, logy=True, show_best_fit=False, **kw):
+        super().__init__(ax, func)
+        x, y = self.x
+        self.line = ax.plot(x, y, **kw)[0]
+        self.best_fit = None
+        self.fit_text = None
+        self.show_best_fit = show_best_fit
+        self.logx = logx
+        self.logy = logy
+
+        if logx:
+            ax.set_xscale('log')
+        if logy:
+            ax.set_yscale('log')
+
+        if self.show_best_fit:
+            self.loglog_fit(x, y)
+
     def set_alpha(self, alpha):
         self.line.set_alpha(alpha)
         if self.best_fit is not None:
@@ -106,24 +126,6 @@ class AnimatedLine(AnimatedPlot):
             self.fit_text.set_text(text_t)
             self.best_fit.set_data(line_x, line_y)
 
-    def __init__(self, ax, func, logx=True, logy=True, show_best_fit=False, **kw):
-        super().__init__(ax, func)
-        x, y = self.x
-        self.line = ax.plot(x, y, **kw)[0]
-        self.best_fit = None
-        self.fit_text = None
-        self.show_best_fit = show_best_fit
-        self.logx = logx
-        self.logy = logy
-
-        if logx:
-            ax.set_xscale('log')
-        if logy:
-            ax.set_yscale('log')
-
-        if self.show_best_fit:
-            self.loglog_fit(x, y)
-
     def animate(self):
         x, y = self.x
         self.line.set_data(x,y)
@@ -142,6 +144,16 @@ class AnimatedLine(AnimatedPlot):
             self.loglog_fit(x, y)
             res = res + [self.best_fit, self.fit_text]
         return res
+
+class AnimatedScatterplot(AnimatedPlot):
+    def __init__(self, ax, func, **kw):
+        super().__init__(ax, func)
+        x, y = self.func()
+        self.scatter = ax.scatter(x, y, **kw)
+
+    def animate(self):
+        self.scatter.set_offsets(np.array(self.func()).T)
+        return [self.scatter]
 
 class AnimatedImage(AnimatedPlot):
     def __init__(self, ax, func, min_vmin=-float('inf'), max_vmax=float('inf')):
@@ -171,7 +183,54 @@ class AnimatedImage(AnimatedPlot):
         self.im.set_clim(self.vmin, self.vmax)
         return [self.im]
 
-def animate_simulation(m, n_frames=100, steps_per_frame=100, label=None, fs=16):
+class ModelWithParticles():
+    def __init__(self, m, grid_side=8):
+        self.m = m
+        self.grid_side = grid_side
+        self.parts1 = self.init_particles()
+        self.parts2 = self.init_particles()
+        
+        self.U1_old, self.U2_old = self.m.ufull
+        self.V1_old, self.V2_old = self.m.vfull
+        
+    def init_particles(self):
+        n = self.m.nx // self.grid_side
+        return GriddedLagrangianParticleArray2D(
+            self.m.x[:,::n][::n],
+            self.m.y[::n,:][:,::n],
+            self.m.nx,
+            self.m.nx,
+            periodic_in_x=True,
+            periodic_in_y=True,
+            xmin=0,
+            xmax=self.m.L,
+            ymin=0,
+            ymax=self.m.L
+        )
+        
+    def normalize_particle_coords(self, x, y):
+        m = self.m
+        xi = ((x % m.L) / m.L) * m.nx
+        yi = ((y % m.L) / m.L) * m.nx
+        return xi, yi
+    
+    @property
+    def normalized_particle_coords(self):
+        return [
+            self.normalize_particle_coords(self.parts1.x, self.parts1.y),
+            self.normalize_particle_coords(self.parts2.x, self.parts2.y),
+        ]
+       
+    def _step_forward(self):
+        self.m._step_forward()
+        U1_new, U2_new = self.m.ufull
+        V1_new, V2_new = self.m.vfull
+        self.parts1.step_forward_with_gridded_uv(self.U1_old, self.V1_old, U1_new, V1_new, self.m.dt)
+        self.parts2.step_forward_with_gridded_uv(self.U2_old, self.V2_old, U2_new, V2_new, self.m.dt)
+        self.U1_old, self.U2_old = self.m.ufull
+        self.V1_old, self.V2_old = self.m.vfull
+
+def animate_simulation(m, n_frames=100, steps_per_frame=100, label=None, suptitle_y=0.95, fs=16):
     #mp = ModelWithParticles(m)
     b = 4
     year = 24*60*60*360.
@@ -229,12 +288,13 @@ def animate_simulation(m, n_frames=100, steps_per_frame=100, label=None, fs=16):
         ylim = max(anim.ylim for anim in anims if anim.ax == axes['xfspec'])
         axes['xfspec'].set_ylim(-ylim, ylim)
         if label is not None:
-            fig.suptitle(f"{label}, t plus {(m.t-t0)/year:.2f} years", fontsize=20, y=0.9, va='bottom')
+            fig.suptitle(f"{label}, t plus {(m.t-t0)/year:.2f} years", fontsize=20, y=suptitle_y, va='bottom')
         else:
-            fig.suptitle(f"t plus {(m.t-t0)/year:.2f} years", fontsize=20, y=0.9, va='bottom')
+            fig.suptitle(f"t plus {(m.t-t0)/year:.2f} years", fontsize=20, y=suptitle_y, va='bottom')
         return res
     
-    plt.tight_layout()
+    gs.tight_layout(fig, rect=[0, 0.03, 1, 0.95])
+
     anim = animation.FuncAnimation(fig, animate, frames=n_frames, interval=50, blit=True)
     return anim
 
