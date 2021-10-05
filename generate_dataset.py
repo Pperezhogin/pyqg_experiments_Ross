@@ -3,10 +3,6 @@ import pyqg
 import gcm_filters
 import numpy as np
 import xarray as xr
-import pandas as pd
-import json
-import gc
-import pickle
 
 def zb2020_uv_parameterization(m, factor_upper=-19723861.3, factor_lower=-32358493.6):
     # Implements Equation 6 of

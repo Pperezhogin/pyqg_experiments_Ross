@@ -5,7 +5,8 @@ import os
 import sys
 import json
 import glob
-sys.path.append('.')
+dirname = os.path.dirname(os.path.realpath(__file__))
+sys.path.append(dirname)
 from models import *
 
 import argparse
@@ -148,7 +149,7 @@ for f in glob.glob(f"{args.test_dir}/*/lores.nc"):
         mean_sq_err=xr.DataArray(mses, **coord_kwargs('lev','time')),
     )).to_netcdf(f"{save_dir}/test/{run_idx}/preds.nc")
 
-from pyqg_subgrid_dataset import generate_parameterized_dataset
+from generate_dataset import generate_parameterized_dataset
 
 year = 24*60*60*360.
 
