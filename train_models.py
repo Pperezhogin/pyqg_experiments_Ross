@@ -1,52 +1,27 @@
-import re
 import os
-
-template = """#!/bin/bash
-
-#SBATCH --nodes=1
-#SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=1
-#SBATCH --time=12:00:00
-#SBATCH --mem=32GB
-#SBATCH --gres=gpu:rtx8000:1
-#SBATCH --job-name=train_model
-#SBATCH -o {outfile}
-
-module purge
-
-singularity exec --nv --overlay /scratch/asr9645/envs/m2lines.ext3:ro /scratch/work/public/singularity/cuda11.1-cudnn8-devel-ubuntu18.04.sif /bin/bash -c "source /ext3/env.sh; python -u train_model.py {args}"
-"""
+import sys
+import argparse
+dirname = os.path.dirname(os.path.realpath(__file__))
+sys.path.append(dirname)
+from slurm_job import SlurmJob
 
 model_dir = "/scratch/zanna/data/pyqg/models"
+job_script = os.path.join(dirname, 'train_model.py')
 
-argsets = [
-    "--save_dir={model_dir}/fullycnn_skip_0.0/{i}",
-    "--save_dir={model_dir}/fullycnn_skip_0.5/{i} --skip_datasets=250",
-    "--save_dir={model_dir}/fullycnn_skip_0.8/{i} --skip_datasets=400",
-    "--save_dir={model_dir}/fullycnn_skip_0.9/{i} --skip_datasets=450",
-    "--save_dir={model_dir}/fullycnn_skip_0.95/{i} --skip_datasets=475",
-    "--save_dir={model_dir}/fullycnn_skip_0.99/{i} --skip_datasets=495",
-    #"--save_dir={model_dir}/fullycnn_no_constraints/{i} --zero_mean=0",
-    #"--save_dir={model_dir}/fullycnn_rescale_loss/{i} --scaler=logpow",
-    #"--save_dir={model_dir}/fullycnn_sparse_grads/{i} --l1_grads=0.0001",
-    #"--save_dir={model_dir}/fullycnn_way2_forcing/{i} --target=q_forcing_model",
-    #"--save_dir={model_dir}/fullycnn_q_only/{i} --inputs=q",
-    #"--save_dir={model_dir}/fullycnn_uv_only/{i} --inputs=u,v",
-]
+def launch_job(**kwargs):
+    job = SlurmJob(job_script, time="12:00:00", mem="32GB", gpu="rtx8000:1", **kwargs)
+    job.launch()
 
-for i in range(3):
-    for argset in argsets:
-        args = argset.format(model_dir=model_dir, i=i)
-        mdir = re.search(r'--save_dir=([^\s]+)', args).group(1)
-        jobfile = f"{mdir}/job.slurm"
-        outfile = f"{mdir}/job.out"
-        cmd = template.format(args=args, outfile=outfile)
+argsets = {}
+argsets["fullycnn"] = dict()
+argsets["fullycnn_no_constraints"] = dict(zero_mean=0)
+argsets["fullycnn_rescale_loss"] = dict(scaler='logpow')
+argsets["fullycnn_way2_forcing"] = dict(target='q_forcing_model')
+argsets["fullycnn_q_only"] = dict(inputs="q")
+argsets["fullycnn_uv_only"] = dict(inputs="u,v")
+for pct in [0.5,0.8,0.9,0.95,0.99]:
+    argsets[f"fullycnn_skip_{pct}"] = dict(skip_datasets=int(500*pct))
 
-        print(mdir)
-
-        os.system(f"mkdir -p {mdir}")
-
-        with open(jobfile, 'w') as f:
-            f.write(cmd)
-
-        os.system(f"cat {jobfile} | sbatch")
+for restart in range(3):
+    for name, kw in argsets.items():
+        launch_job(save_dir=f"{model_dir}/{name}/{restart}", **kw)
