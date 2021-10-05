@@ -1,4 +1,5 @@
 import os
+import glob
 import pyqg
 import gcm_filters
 import numpy as np
@@ -210,6 +211,45 @@ def generate_forcing_dataset(nx1=256, nx2=64, dt=3600., sampling_freq=1000, samp
     d2 = concat_and_convert(datasets2)
 
     return d1, d2
+
+class PYQGSubgridDataset():
+    def __init__(self, data_dir='/scratch/zanna/data/pyqg/64_256/train', key='lores', skip=0):
+        self.data_files = list(sorted(glob.glob(f"{data_dir}/*/{key}.nc")))[skip:]
+        self.datasets = [xr.open_dataset(f) for f in self.data_files]
+        self.extracted = {}
+
+    def extract_variable(self, var, z=None):
+        key = (var, z)
+        if key not in self.extracted:
+            self.extracted[key] = np.vstack([
+                (ds.isel(lev=z) if z is not None else ds)[var].data
+                for ds in self.datasets
+            ])
+        return self.extracted[key]
+
+    def extract_variables(self, vars, z):
+        if isinstance(vars, str):
+            vars = vars.split(",")
+        return np.swapaxes(np.array([
+            self.extract_variable(var, z) for var in vars
+        ]), 0, 1)
+
+    @property
+    def q1(self): return self.extract_variable('q', 0)
+    @property
+    def q2(self): return self.extract_variable('q', 1)
+    @property
+    def u1(self): return self.extract_variable('ufull', 0)
+    @property
+    def u2(self): return self.extract_variable('ufull', 1)
+    @property
+    def v1(self): return self.extract_variable('vfull', 0)
+    @property
+    def v2(self): return self.extract_variable('vfull', 1)
+    @property
+    def Sq1(self): return self.extract_variable('q_forcing_advection', 0)
+    @property
+    def Sq2(self): return self.extract_variable('q_forcing_advection', 1)
 
 if __name__ == '__main__':
     import argparse
