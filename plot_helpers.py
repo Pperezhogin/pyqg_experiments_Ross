@@ -251,8 +251,12 @@ def animate_simulation(m, n_frames=100, steps_per_frame=100, label=None, suptitl
         'en': titleize(gs[0,3], "Enstrophy $\\int \\omega^2$"),
         'kespec': titleize(gs[1,2], "Kinetic Energy Spectrum"),
         'enspec': titleize(gs[1,3], "Enstrophy Spectrum"),
-       'xfspec':  titleize(gs[1,:2], "Spectral Energy Transfers"),
+        'xfspec':  titleize(gs[1,:2], "Spectral Energy Transfers"),
     }
+
+    for ax in ['q1','q2','ke','en']:
+        axes[ax].set_xlabel("Longitude $x$", fontsize=14)
+        axes[ax].set_ylabel("Latitude $y$", fontsize=14)
     
     def model_dataset():
         ds = m.to_dataset().isel(time=-1)
