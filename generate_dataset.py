@@ -89,8 +89,9 @@ def concat_and_convert(datasets):
 
 def generate_control_dataset(nx=64, dt=3600., sampling_freq=1000, sampling_dist='uniform', after_each=None, **kwargs):
     year = 24*60*60*360.
-    pyqg_kwargs = dict(tmax=5*year, tavestart=2.5*year, dt=dt)
+    pyqg_kwargs = dict(tmax=10*year, dt=dt)
     pyqg_kwargs.update(**kwargs)
+    pyqg_kwargs['tavestart'] = pyqg_kwargs['tmax'] * 0.5
 
     m = pyqg.QGModel(nx=nx, **pyqg_kwargs)
     datasets = []
@@ -109,8 +110,9 @@ def generate_forcing_dataset(nx1=256, nx2=64, dt=3600., sampling_freq=1000, samp
     scale = nx1//nx2
     
     year = 24*60*60*360.
-    pyqg_kwargs = dict(tmax=5*year, tavestart=2.5*year, dt=dt)
+    pyqg_kwargs = dict(tmax=10*year, dt=dt)
     pyqg_kwargs.update(**kwargs)
+    pyqg_kwargs['tavestart'] = pyqg_kwargs['tmax'] * 0.5
     
     if filter is None:
         filter = gcm_filters.Filter(filter_scale=scale, dx_min=1, grid_type=gcm_filters.GridType.REGULAR)
