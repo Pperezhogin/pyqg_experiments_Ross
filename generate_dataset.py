@@ -4,6 +4,8 @@ import pyqg
 import gcm_filters
 import numpy as np
 import xarray as xr
+import numpy.fft as npfft
+from pyqg.xarray_output import spatial_dims
 
 def zb2020_uv_parameterization(m, factor_upper=-19723861.3, factor_lower=-32358493.6):
     # Implements Equation 6 of
@@ -66,7 +68,14 @@ def generate_parameterized_dataset(cnn0, cnn1, inputs, divide_by_dt=False, **kwa
 
     return generate_control_dataset(q_parameterization=q_parameterization, **kwargs)
 
+def spatial_var(var, ds):
+    return xr.DataArray(var, coords=dict([(d, ds.coords[d]) for d in spatial_dims]), dims=spatial_dims)
+
 def concat_and_convert(datasets):
+    # Convert and save important spectral variables back in real space
+    for ds in datasets:
+        ds['streamfunction'] = spatial_var(npfft.irfftn(ds.ph, axes=(-2,-1)), ds)
+
     # Concatenate datasets along the time dimension
     d = xr.concat(datasets, dim='time')
     
@@ -165,6 +174,14 @@ def generate_forcing_dataset(nx1=256, nx2=64, dt=3600., sampling_freq=1000, samp
 
         if should_sample:
             ds1 = m1.to_dataset().copy(deep=True)
+
+            derivs = ['dqdt', 'dqdt_p', 'dqdt_pp']
+            for dq in derivs:
+                ds1[dq] = xr.DataArray(
+                    npfft.irfftn(getattr(m1, dq.replace('dq', 'dqh')), axes=(-2,-1))[np.newaxis],
+                    coords=[ds1.coords[d] for d in spatial_dims]
+                )
+
             ds1_downscaled = downscaled(ds1)
             m2.set_q1q2(*ds1_downscaled.q.isel(time=0).copy().data)
             ds2 = m2.to_dataset().copy(deep=True)
@@ -181,26 +198,28 @@ def generate_forcing_dataset(nx1=256, nx2=64, dt=3600., sampling_freq=1000, samp
                 advected(ds1_downscaled, 'vfull') -
                 downscaled(advected(ds1, 'vfull'))
             )
+            for dq in derivs:
+                ds2[dq] = ds1_downscaled[dq]
 
             m1._step_forward()
             m2._step_forward()
 
-            ds1_downscaled2 = downscaled(m1.to_dataset()).isel(time=0)
-            q_post = ds1_downscaled2.q.data
-            u_post = ds1_downscaled2.ufull.data
-            v_post = ds1_downscaled2.vfull.data
+            ds1_post = m1.to_dataset().copy(deep=True)
+            ds2_post = m2.to_dataset().copy(deep=True)
+
+            ds1_post['dqdt'] = xr.DataArray(
+                npfft.irfftn(m1.dqhdt, axes=(-2,-1))[np.newaxis],
+                coords=[ds1_post.coords[d] for d in spatial_dims]
+            )
+
+            ds2_post['dqdt'] = xr.DataArray(
+                npfft.irfftn(m2.dqhdt, axes=(-2,-1))[np.newaxis],
+                coords=[ds2_post.coords[d] for d in spatial_dims]
+            )
 
             ds2['q_forcing_model'] = xr.DataArray(
-                np.expand_dims(m2.q - q_post, 0),
-                coords=[ds2.coords[d] for d in ds2.q.coords]
-            )
-            ds2['u_forcing_model'] = xr.DataArray(
-                np.expand_dims(m2.ufull - u_post, 0),
-                coords=[ds2.coords[d] for d in ds2.q.coords]
-            )
-            ds2['v_forcing_model'] = xr.DataArray(
-                np.expand_dims(m2.vfull - v_post, 0),
-                coords=[ds2.coords[d] for d in ds2.q.coords]
+                (downscaled(ds1_post).dqdt - ds2_post.dqdt).data,
+                coords=[ds2.coords[d] for d in spatial_dims]
             )
 
             datasets1.append(ds1)
