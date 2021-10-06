@@ -25,7 +25,7 @@ xfer = xr.load_mfdataset("/scratch/zanna/data/pyqg/64_256/transfer/*/lores.nc", 
 
 For the training set, this won't work because each simulation is sampled at different time intervals. Instead, you can use the following helpers:
 
-```
+```python
 from generate_dataset import PYQGSubgridDataset
 
 train = PYQGSubgridDataset("/scratch/zanna/data/pyqg/64_256/train")
