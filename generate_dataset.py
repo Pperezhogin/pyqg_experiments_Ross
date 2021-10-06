@@ -273,6 +273,8 @@ if __name__ == '__main__':
     if args.transfer_test:
         kwargs.update(dict(rd=15625.0, beta=1.0e-11, delta=0.1,  L=2000000.0))
 
+    os.system(f"mkdir -p {args.save_dir}")
+
     def save(ds, key):
         ds.to_netcdf(os.path.join(args.save_dir, f"{key}.nc"))
 
