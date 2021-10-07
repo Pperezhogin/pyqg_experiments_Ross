@@ -11,8 +11,8 @@ from models import *
 
 import argparse
 parser = argparse.ArgumentParser()
-parser.add_argument('--train_dir', type=str, default="/scratch/zanna/data/pyqg/64_256/train")
-parser.add_argument('--test_dir', type=str, default="/scratch/zanna/data/pyqg/64_256/test")
+parser.add_argument('--train_dir', type=str, default="/scratch/zanna/data/pyqg/datasets/train")
+parser.add_argument('--test_dir', type=str, default="/scratch/zanna/data/pyqg/datasets/test")
 parser.add_argument('--save_dir', type=str)
 parser.add_argument('--inputs', type=str, default="u,v,q")
 parser.add_argument('--target', type=str, default="q_forcing_advection")
@@ -168,6 +168,6 @@ for j, params in enumerate(paramsets):
         f.write(json.dumps(params))
 
     for i in range(4):
-        run = generate_parameterized_dataset(cnn0, cnn1, args.inputs, divide_by_dt=('forcing_model' in args.target), **params)
+        run = generate_parameterized_dataset(cnn0, cnn1, args.inputs, **params)
         complex_vars = [k for k,v in run.variables.items() if v.dtype == np.complex128]
         run.drop(complex_vars).to_netcdf(os.path.join(run_dir, f"{i}.nc"))

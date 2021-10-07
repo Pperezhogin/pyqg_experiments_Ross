@@ -363,29 +363,35 @@ def power_spectrum(key, run, z=None):
     elif z is not None: data = data[z]
     return calc_ispec(model, data)
 
-def plot_spectra(quantity, runs, ax=None, z=None, log=True, leg=True, xlim=None):
+def plot_spectra(quantity, runs, ax=None, z=None, log=True, leg=True, xlim=None, indiv=True):
     if ax is None: ax = plt.gca()
         
     maxes = []
+    
+    plot_fn = ax.loglog if log else ax.semilogx
 
     for r in runs:
         if quantity not in r: continue
         s_vals = []
+        line = None
         for i in range(len(r.run)):
             k,s = power_spectrum(quantity, r.isel(run=i), z=z)
-            s_vals.append(s)
+            s_vals.append(s)                
         s = np.array(s_vals)
-        q = np.percentile(s,50,axis=0)
-        if log:
-            line = ax.loglog(k,q,lw=2,**r.attrs['plot_kwargs'])
-        else:
-            line = ax.semilogx(k,q,lw=2,**r.attrs['plot_kwargs'])
-        ax.fill_between(k, np.percentile(s,5,axis=0), np.percentile(s,95,axis=0), alpha=0.1, color=line[0]._color)
         maxes.append(s.max())
+        q = np.percentile(s,50,axis=0)
+        line = plot_fn(k,q,lw=3,**r.attrs['plot_kwargs'],zorder=10)
+        ax.fill_between(k, np.percentile(s,5,axis=0), np.percentile(s,95,axis=0), alpha=0.1, color=line[0]._color)
+        if indiv:
+            for s in s_vals:
+                kw = dict(r.attrs['plot_kwargs'])
+                kw['color'] = line[0]._color
+                del kw['label']
+                plot_fn(k,s,alpha=0.075,zorder=9,**kw)
 
     if xlim is not None:
         ax.set_xlim(*xlim)
     ax.set_xlabel("$k$ ($m^{-1}$)")
     ax.set_ylabel(quantity)
     if log: ax.set_ylim(min(maxes)/1000, max(maxes)*2)
-    if leg: ax.legend(loc='best',fontsize=12)
+    if leg: ax.legend(loc='best',fontsize=12).set_zorder(11)

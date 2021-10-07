@@ -45,15 +45,23 @@ def generate_physically_parameterized_dataset(factor_upper=-19723861.3, factor_l
     uv_param = lambda m: zb2020_uv_parameterization(m, factor_upper=factor_upper, factor_lower=factor_lower)
     return generate_control_dataset(uv_parameterization=uv_param, **kwargs)
 
-def generate_parameterized_dataset(cnn0, cnn1, inputs, divide_by_dt=False, **kwargs):
+def generate_parameterized_dataset(cnn0, cnn1, inputs, **kwargs):
     import torch
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     cnn0.to(device)
     cnn1.to(device)
 
+    def get_input(m,inp):
+        if 'dqdt' in inp:
+            import numpy.fft as npfft
+            val = getattr(m,inp.replace('dq','dqh'))
+            return npfft.irfftn(val,axes=(-2,-1))
+        else:
+            return getattr(m,inp)
+
     def get_inputs(m,z):
         return np.array([[
-            getattr(m,inp)[z]
+            get_input(m,inp)[z]
             for inp in inputs.split(",")
         ]]).astype(np.float32)
 
@@ -62,8 +70,6 @@ def generate_parameterized_dataset(cnn0, cnn1, inputs, divide_by_dt=False, **kwa
             cnn0.predict(get_inputs(m,0), device=device)[0,0],
             cnn1.predict(get_inputs(m,1), device=device)[0,0]
         ]).astype(m.q.dtype)
-        if divide_by_dt:
-            dq = dq / kwargs.get('dt', 3600.)
         return dq
 
     return generate_control_dataset(q_parameterization=q_parameterization, **kwargs)
