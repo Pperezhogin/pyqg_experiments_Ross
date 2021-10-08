@@ -296,7 +296,7 @@ if __name__ == '__main__':
         key, val = param.split('=')
         kwargs[key.replace('--', '')] = float(val)
     if args.transfer_test:
-        kwargs.update(dict(rd=15625.0, beta=1.0e-11, delta=0.1,  L=2000000.0))
+        kwargs.update(dict(rek=7.000000e-08, delta=0.1, beta=1.0e-11))
 
     os.system(f"mkdir -p {args.save_dir}")
 
