@@ -1,9 +1,8 @@
 .ipynb_checkpoints/
 __pycache__/
 slurm*.out
-*.swp
-*.swo
-*.swn
-*.swl
-*.swm
+*.sw[a-z]
 Untitled*.ipynb
+foo/
+bar/
+baz/
