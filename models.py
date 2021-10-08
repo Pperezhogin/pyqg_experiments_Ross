@@ -65,8 +65,6 @@ def train(net, inputs, targets, num_epochs=50, batch_size=64, learning_rate=0.00
             optimizer.step()
             epoch_loss += loss.item()
 
-            if epoch_steps % 10 == 0:
-                print(f"MSE: {mse_loss:.2e}, grads: {grad_loss:.2e}")
             epoch_steps += 1
         print(f"Loss after Epoch {epoch+1}: {epoch_loss/epoch_steps}")
         scheduler.step()
