@@ -28,7 +28,7 @@ class AnimatedSpectrum(AnimatedPlot):
     def started_averaging(self):
         return self.m.diagnostics['KEspec']['count'] > 0
 
-    def __init__(self, ax, m, spec, logy=True):
+    def __init__(self, ax, m, spec, logy=True, fit_opts={}):
         def maybe_sum(arr):
             if len(arr.shape) == 3:
                 return arr.sum(axis=0)
@@ -56,7 +56,7 @@ class AnimatedSpectrum(AnimatedPlot):
         self.ax = ax
         self.spec = spec
         self.curr_line = AnimatedLine(ax, get_curr, ls='--', logy=logy)
-        self.mean_line = AnimatedLine(ax, get_mean, lw=3, logy=logy, show_best_fit=logy, color=self.curr_line.color, label=spec)
+        self.mean_line = AnimatedLine(ax, get_mean, lw=3, logy=logy, show_best_fit=logy, fit_opts=fit_opts, color=self.curr_line.color, label=spec)
         self.ax.set_xlabel("Wavenumber $k$", fontsize=14)
         self.logy = logy
         #self.ax.set_ylabel(f"{spec}", fontsize=14)
@@ -75,7 +75,7 @@ class AnimatedSpectrum(AnimatedPlot):
         return res
         
 class AnimatedLine(AnimatedPlot):
-    def __init__(self, ax, func, logx=True, logy=True, show_best_fit=False, **kw):
+    def __init__(self, ax, func, logx=True, logy=True, show_best_fit=False, fit_opts={}, **kw):
         super().__init__(ax, func)
         x, y = self.x
         self.line = ax.plot(x, y, **kw)[0]
@@ -84,6 +84,7 @@ class AnimatedLine(AnimatedPlot):
         self.show_best_fit = show_best_fit
         self.logx = logx
         self.logy = logy
+        self.fit_opts = fit_opts
 
         if logx:
             ax.set_xscale('log')
@@ -91,7 +92,7 @@ class AnimatedLine(AnimatedPlot):
             ax.set_yscale('log')
 
         if self.show_best_fit:
-            self.loglog_fit(x, y)
+            self.loglog_fit(x, y, **fit_opts)
 
     def set_alpha(self, alpha):
         self.line.set_alpha(alpha)
@@ -103,9 +104,9 @@ class AnimatedLine(AnimatedPlot):
     def color(self):
         return self.line._color
 
-    def loglog_fit(self, x, y, fudge=1.5):
-        i = np.argmax(y) + 4
-        j = np.argmin(np.abs(np.log(x)-np.log(x[i]*5)))
+    def loglog_fit(self, x, y, fudge=1.5, offset=4, mult=5):
+        i = np.argmax(y) + offset
+        j = np.argmin(np.abs(np.log(x)-np.log(x[i]*mult)))
         line_x = x[i:]
         if y.min() <= 0:
             line_y = y
@@ -142,7 +143,7 @@ class AnimatedLine(AnimatedPlot):
             self.ylim = max(self.ymax, -self.ymin)
 
         if self.show_best_fit:
-            self.loglog_fit(x, y)
+            self.loglog_fit(x, y, **self.fit_opts)
             res = res + [self.best_fit, self.fit_text]
         return res
 
@@ -231,7 +232,7 @@ class ModelWithParticles():
         self.U1_old, self.U2_old = self.m.ufull
         self.V1_old, self.V2_old = self.m.vfull
 
-def animate_simulation(m, n_frames=100, steps_per_frame=100, label=None, suptitle_y=0.95, fs=16):
+def animate_simulation(m, n_frames=100, steps_per_frame=100, label=None, suptitle_y=0.95, fs=16, fit_opts={}):
     #mp = ModelWithParticles(m)
     b = 4
     year = 24*60*60*360.
@@ -273,8 +274,8 @@ def animate_simulation(m, n_frames=100, steps_per_frame=100, label=None, suptitl
         AnimatedImage(axes['q2'], lambda: m.q[1]),
         AnimatedImage(axes['ke'], lambda: model_dataset().ke.sum(dim='lev'), min_vmin=0),
         AnimatedImage(axes['en'], lambda: model_dataset().enstrophy.sum(dim='lev'), min_vmin=0),
-        AnimatedSpectrum(axes['kespec'], m, 'KEspec'),
-        AnimatedSpectrum(axes['enspec'], m, 'entspec'),
+        AnimatedSpectrum(axes['kespec'], m, 'KEspec', fit_opts=fit_opts),
+        AnimatedSpectrum(axes['enspec'], m, 'entspec', fit_opts=fit_opts),
         AnimatedSpectrum(axes['xfspec'], m, 'APEgenspec', logy=False),
         AnimatedSpectrum(axes['xfspec'], m, 'APEflux', logy=False),
         AnimatedSpectrum(axes['xfspec'], m, 'KEflux', logy=False),
