@@ -41,7 +41,7 @@ def zb2020_uv_parameterization(m, factor_upper=-19723861.3, factor_lower=-323584
 
     return np.array(du.data), np.array(dv.data)
 
-def generate_ag7531_parameterization(**kwargs):
+def generate_ag7531_parameterized_dataset(**kwargs):
     import torch
     import sys
     sys.path.append('/scratch/zanna/code/ag7531')
@@ -303,6 +303,7 @@ if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--save_dir', type=str)
+    parser.add_argument('--ag7531', type=int, default=0)
     parser.add_argument('--control', type=int, default=0)
     parser.add_argument('--physical', type=int, default=0)
     parser.add_argument('--sampling_freq', type=int, default=1000)
@@ -327,6 +328,8 @@ if __name__ == '__main__':
     # Run the dataset generation function and save the results to save_dir
     if args.physical:
         save(generate_physically_parameterized_dataset(**kwargs), 'physical')
+    elif args.ag7531:
+        save(generate_ag7531_parameterized_dataset(**kwargs), 'ag7531')
     elif args.control:
         save(generate_control_dataset(**kwargs), 'control')
     else:
