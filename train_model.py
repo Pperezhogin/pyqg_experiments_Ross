@@ -155,7 +155,7 @@ year = 24*60*60*360.
 
 paramsets = [
     dict(rd=15000.0, beta=1.5e-11, delta=0.25, L=1000000.0),
-    dict(rd=15625.0, beta=1.0e-11, delta=0.1,  L=2000000.0, tmax=20*year, tavestart=10*year)
+    dict(rd=15625.0, beta=1.0e-11, delta=0.1,  tmax=10*year, tavestart=5*year)
 ]
 
 cnn0, cnn1 = models
