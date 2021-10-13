@@ -261,21 +261,29 @@ def generate_forcing_dataset(nx1=256, nx2=64, dt=3600., sampling_freq=1000, samp
     return d1, d2
 
 class PYQGSubgridDataset():
-    def __init__(self, data_dir='/scratch/zanna/data/pyqg/64_256/train', key='lores', skip=0):
-        self.data_files = list(sorted(glob.glob(f"{data_dir}/*/{key}.nc")))[skip:]
-        self.datasets = [xr.open_dataset(f) for f in self.data_files]
+    def __init__(self, data_dir='/scratch/zanna/data/pyqg/datasets/train', key='lores', skip=0):
+        self.dataset = xr.open_mfdataset(f"{data_dir}/*/{key}.nc", combine="nested", concat_dim="run")
         self.extracted = {}
+        
+    @property
+    def resolution(self):
+        r1 = self.dataset.coords['x'].shape[0]
+        r2 = self.dataset.coords['y'].shape[0]
+        assert r1 == r2
+        return r1
+    
+    @property
+    def time(self):
+        return self.dataset.time.data.reshape(-1,1).repeat(self.dataset.run.shape[0], axis=1).T.ravel()
 
     def extract_variable(self, var, z=None):
         key = (var, z)
         if key not in self.extracted:
-            self.extracted[key] = np.vstack([
-                (ds.isel(lev=z) if z is not None else ds)[var].data
-                for ds in self.datasets
-            ])
+            ds = self.dataset.isel(lev=z) if z is not None else self.dataset
+            self.extracted[key] = np.array(ds[var].data.reshape(-1, self.resolution, self.resolution))
         return self.extracted[key]
 
-    def extract_variables(self, vars, z):
+    def extract_variables(self, vars, z=None):
         if isinstance(vars, str):
             vars = vars.split(",")
         return np.swapaxes(np.array([
