@@ -46,11 +46,11 @@ def zb2020_uv_parameterization(m, factor_upper=-19723861.3, factor_lower=-323584
 
     return np.array(du.data), np.array(dv.data)
 
-def generate_ag7531_parameterized_dataset(**kwargs):
+def generate_ag7531_parameterized_dataset(factor=1.0, **kwargs):
     import torch
     import sys
     sys.path.append('/scratch/zanna/code/ag7531')
-    sys.path.append('/scratch/zanna/code/ag7531/ag7531-pyqgparamexperiments')
+    sys.path.append('/scratch/zanna/code/ag7531/pyqgparamexperiments')
     from subgrid.models.utils import load_model_cls
     from subgrid.models.transforms import SoftPlusTransform
     from parameterization import Parameterization
@@ -61,10 +61,12 @@ def generate_ag7531_parameterized_dataset(**kwargs):
     net.final_transformation.indices = [1,3]
     net.load_state_dict(
         torch.load('/scratch/zanna/data/pyqg/models/ag7531/1/dc74cea68a7f4c7e98f9228649a97135/artifacts/models/trained_model.pth'),
-        map_location=device)
+    )
+    net.to(device)
     param = Parameterization(net, device)
     def uv_parameterization(m):
-        return param(m.ufull, m.vfull, m.t)
+        du, dv = param(m.ufull, m.vfull, m.t)
+        return du*factor, dv*factor
     return generate_control_dataset(uv_parameterization=uv_parameterization, **kwargs)
 
 def generate_symbolic_regression_parameterized_dataset(
@@ -363,7 +365,10 @@ if __name__ == '__main__':
     if args.physical:
         save(generate_physically_parameterized_dataset(**kwargs), 'physical')
     elif args.ag7531:
-        save(generate_ag7531_parameterized_dataset(**kwargs), 'ag7531')
+        if 'factor' in kwargs:
+            save(generate_ag7531_parameterized_dataset(**kwargs), f"ag7531_{kwargs['factor']}")
+        else:
+            save(generate_ag7531_parameterized_dataset(**kwargs), 'ag7531')
     elif args.symbolic:
         save(generate_symbolic_regression_parameterized_dataset(**kwargs), 'symbolic')
     elif args.control:
