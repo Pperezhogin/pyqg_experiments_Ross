@@ -364,7 +364,8 @@ def power_spectrum(key, run, z=None):
     elif z is not None: data = data[z]
     return calc_ispec(model, data)
 
-def plot_spectra(quantity, runs, ax=None, z=None, log=True, leg=True, xlim=None, indiv=True):
+
+def plot_spectra(quantity, runs, ax=None, z=None, log=True, leg=True, xlim=None, indiv=True, offset=2, mult=2, loglog_fit=False):
     if ax is None: ax = plt.gca()
         
     maxes = []
@@ -381,7 +382,20 @@ def plot_spectra(quantity, runs, ax=None, z=None, log=True, leg=True, xlim=None,
         s = np.array(s_vals)
         maxes.append(s.max())
         q = np.percentile(s,50,axis=0)
-        line = plot_fn(k,q,lw=3,**r.attrs['plot_kwargs'],zorder=10)
+
+        kwargs = dict(r.attrs['plot_kwargs'])
+
+        if loglog_fit:
+            i = np.argmax(q) + offset
+            j = np.argmin(np.abs(np.log(k)-np.log(k[i]*mult)))
+            lr = linregress(np.log(k[i:j]), np.log(q[i:j]))
+            kwargs['label'] = kwargs.get('label', '') + " ($k^{"+f"{lr.slope:.2f}"+"}$)" 
+
+        line = plot_fn(k,q,lw=3,**kwargs,zorder=10)
+
+        if loglog_fit:
+            plot_fn(k[i-1:j+1], np.exp(np.log(k[i-1:j+1]) * lr.slope + lr.intercept)*1.2, color=line[0]._color, ls='--', alpha=0.5)
+
         ax.fill_between(k, np.percentile(s,5,axis=0), np.percentile(s,95,axis=0), alpha=0.1, color=line[0]._color)
         if indiv:
             for s in s_vals:

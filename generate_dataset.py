@@ -1,11 +1,16 @@
 import os
+import sys
 import glob
 import pyqg
+import pickle
 import gcm_filters
 import numpy as np
 import xarray as xr
 import numpy.fft as npfft
 from pyqg.xarray_output import spatial_dims
+dirname = os.path.dirname(os.path.realpath(__file__))
+sys.path.append(dirname)
+from symbolic_regression_parameterization import *
 
 def zb2020_uv_parameterization(m, factor_upper=-19723861.3, factor_lower=-32358493.6):
     # Implements Equation 6 of
@@ -61,6 +66,21 @@ def generate_ag7531_parameterized_dataset(**kwargs):
     def uv_parameterization(m):
         return param(m.ufull, m.vfull, m.t)
     return generate_control_dataset(uv_parameterization=uv_parameterization, **kwargs)
+
+def generate_symbolic_regression_parameterized_dataset(
+        m1_path=f"{dirname}/models/upper_layer_symbolic_regression_parameterization.pkl",
+        m2_path=f"{dirname}/models/lower_layer_symbolic_regression_parameterization.pkl",
+        factor=1.0,
+        **kwargs):
+    with open(m1_path, 'rb') as f: upper = pickle.load(f)
+    with open(m2_path, 'rb') as f: lower = pickle.load(f)
+
+    def q_parameterization(m):
+        p1 = upper.predict(m)
+        p2 = np.zeros_like(p1) #lower.predict(m)
+        return factor * np.array([ p1 - p1.mean(), p2 - p2.mean() ])
+
+    return generate_control_dataset(q_parameterization=q_parameterization, **kwargs)
 
 def generate_physically_parameterized_dataset(factor_upper=-19723861.3, factor_lower=-32358493.6, **kwargs):
     uv_param = lambda m: zb2020_uv_parameterization(m, factor_upper=factor_upper, factor_lower=factor_lower)
@@ -312,6 +332,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--save_dir', type=str)
     parser.add_argument('--ag7531', type=int, default=0)
+    parser.add_argument('--symbolic', type=int, default=0)
     parser.add_argument('--control', type=int, default=0)
     parser.add_argument('--physical', type=int, default=0)
     parser.add_argument('--sampling_freq', type=int, default=1000)
@@ -338,6 +359,8 @@ if __name__ == '__main__':
         save(generate_physically_parameterized_dataset(**kwargs), 'physical')
     elif args.ag7531:
         save(generate_ag7531_parameterized_dataset(**kwargs), 'ag7531')
+    elif args.symbolic:
+        save(generate_symbolic_regression_parameterized_dataset(**kwargs), 'symbolic')
     elif args.control:
         save(generate_control_dataset(**kwargs), 'control')
     else:
