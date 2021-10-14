@@ -254,19 +254,24 @@ def generate_forcing_dataset(nx1=256, nx2=64, dt=3600., sampling_freq=1000, samp
             ds1_post = m1.to_dataset().copy(deep=True)
             ds2_post = m2.to_dataset().copy(deep=True)
 
-            ds1_post['dqdt'] = xr.DataArray(
+            ds1['dqdt_post'] = xr.DataArray(
                 npfft.irfftn(m1.dqhdt, axes=(-2,-1))[np.newaxis],
-                coords=[ds1_post.coords[d] for d in spatial_dims]
+                coords=[ds1.coords[d] for d in spatial_dims]
             )
 
-            ds2_post['dqdt'] = xr.DataArray(
+            ds2['dqdt_post'] = xr.DataArray(
                 npfft.irfftn(m2.dqhdt, axes=(-2,-1))[np.newaxis],
-                coords=[ds2_post.coords[d] for d in spatial_dims]
+                coords=[ds2.coords[d] for d in spatial_dims]
             )
 
-            ds2['q_forcing_model'] = xr.DataArray(
-                (downscaled(ds1_post).dqdt - ds2_post.dqdt).data,
+            ds2['dqdt_post_hires_downscaled'] = xr.DataArray(
+                downscaled(ds1).dqdt_post.data,
                 coords=[ds2.coords[d] for d in spatial_dims]
+            )
+
+            ds2['q_forcing_model'] = (
+                ds2['dqdt_post_hires_downscaled'] - 
+                ds2['dqdt_post']
             )
 
             datasets1.append(ds1)
