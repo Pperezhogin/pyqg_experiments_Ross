@@ -54,7 +54,7 @@ class SlurmJob(object):
             lines += [f"#SBATCH --gres=gpu:{self.gpu}"]
 
         if self.save_dir and self.save_command:
-            lines += [f"#SBATCH -o {os.path.join(self.save_dir, 'job.out')}"]
+            lines += [f"#SBATCH -o {os.path.join(self.save_dir, self.job_name+'.out')}"]
 
         lines += ["", "module purge", "", self.command]
 
@@ -70,7 +70,7 @@ class SlurmJob(object):
     def launch(self):
         if self.save_dir and self.save_command:
             os.system(f"mkdir -p {self.save_dir}")
-            command_filename = os.path.join(self.save_dir, "job.slurm")
+            command_filename = os.path.join(self.save_dir, f"{self.job_name}.slurm")
         else:
             command_filename = "tmp.slurm"
 

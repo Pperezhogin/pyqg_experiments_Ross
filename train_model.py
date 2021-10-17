@@ -32,35 +32,29 @@ os.system(f"mkdir -p {save_dir}")
 with open(f"{save_dir}/model_config.json", 'w') as f:
     f.write(json.dumps(args.__dict__))
 
-train_files = sorted(glob.glob(f"{args.train_dir}/*/lores.nc"))
-train_datasets = [xr.open_dataset(f) for f in train_files][args.skip_datasets:]
-
+train = xr.open_mfdataset(f"{args.train_dir}/*/lores.nc", combine="nested", concat_dim="run")
+num_datasets = len(train.run)
+train = train.isel(run=slice(args.skip_datasets, None))
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
+print(device)
 models = []
-
-def extract_vars(qtys, datasets, z):
-    return np.vstack([
-      np.swapaxes(np.array([
-        ds.isel(lev=z)[qty].data
-        for qty in qtys
-      ]),0,1)  
-      for ds in datasets
-    ])
-
-def extract_xy(datasets, z):
-    x = extract_vars(args.inputs.split(","), datasets, z)
-    y = extract_vars(args.target.split(","), datasets, z)
-    return x, y
+inputs = [(feat, z) for feat in args.inputs.split(",") for z in range(2)]
+X_train = None
 
 for z in range(2):
     print(f"z={z}")
-    
-    X_train, Y_train = extract_xy(train_datasets, z)
+
+    targets = [(feat, z) for feat in args.target.split(",")]
+
+    model = FullyCNN(inputs, targets)
+
+    if X_train is None:
+        X_train = model.extract_inputs_from_netcdf(train)
+
+    Y_train = model.extract_targets_from_netcdf(train)
 
     print("Extracted datasets")
 
-    model = FullyCNN(X_train.shape[1], Y_train.shape[1])
     model_path = f"{save_dir}/model_z{z}"
 
     if os.path.exists(model_path):
@@ -75,11 +69,11 @@ for z in range(2):
         else:
             X_scale = BasicScaler(
                 mu=np.array([
-                    X_train[:,i].mean() for i,_ in enumerate(args.inputs.split(","))
+                    X_train[:,i].mean() for i in range(X_train.shape[1])
                 ])[np.newaxis,:,np.newaxis,np.newaxis],
 
                 sd=np.array([
-                    X_train[:,i].std() for i,_ in enumerate(args.inputs.split(","))
+                    X_train[:,i].std() for i in range(X_train.shape[1])
                 ])[np.newaxis,:,np.newaxis,np.newaxis]
             )
 
@@ -96,7 +90,7 @@ for z in range(2):
 
         num_epochs = args.num_epochs
         if args.skip_datasets > 0:
-            num_epochs = int(num_epochs * (len(train_files) / args.skip_datasets))
+            num_epochs = int(num_epochs * (num_datasets / args.skip_datasets))
 
         print("Starting fitting")
         model.fit(X_train, Y_train,
@@ -119,12 +113,13 @@ for f in glob.glob(f"{args.test_dir}/*/lores.nc"):
     run_idx = f.split("/")[-2]
     if os.path.exists(f"{save_dir}/test/{run_idx}/preds.nc"): continue
 
-    ds = xr.open_dataset(f)
+    ds = xr.open_dataset(f).expand_dims('run')
     preds = []
     corrs = []
     mses = []
     for z in range(2):
-        x, y = extract_xy([ds], z)
+        x = models[z].extract_inputs_from_netcdf(ds)
+        y = models[z].extract_targets_from_netcdf(ds)
         yhat = models[z].predict(x, device=device)
         preds.append(yhat)
         corrs.append([pearsonr(yi.reshape(-1), yhi.reshape(-1))[0] for yi, yhi in zip(y, yhat)])
@@ -154,8 +149,8 @@ from generate_dataset import generate_parameterized_dataset
 year = 24*60*60*360.
 
 paramsets = [
-    dict(rd=15000.0, beta=1.5e-11, delta=0.25, L=1000000.0),
-    dict(rd=15625.0, beta=1.0e-11, delta=0.1,  tmax=10*year, tavestart=5*year)
+    dict(),
+    dict(rek=7.000000e-08, delta=0.1, beta=1.0e-11)
 ]
 
 cnn0, cnn1 = models
@@ -168,6 +163,6 @@ for j, params in enumerate(paramsets):
         f.write(json.dumps(params))
 
     for i in range(4):
-        run = generate_parameterized_dataset(cnn0, cnn1, args.inputs, **params)
+        run = generate_parameterized_dataset(cnn0, cnn1, **params)
         complex_vars = [k for k,v in run.variables.items() if v.dtype == np.complex128]
         run.drop(complex_vars).to_netcdf(os.path.join(run_dir, f"{i}.nc"))

@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.optim as optim
 import pickle
 import numpy as np
+import numpy.fft as npfft
 from collections import OrderedDict
 from sklearn.isotonic import IsotonicRegression
 
@@ -64,8 +65,9 @@ def train(net, inputs, targets, num_epochs=50, batch_size=64, learning_rate=0.00
             loss.backward()
             optimizer.step()
             epoch_loss += loss.item()
-
             epoch_steps += 1
+            if (epoch_steps - 1) % 100 == 0:
+                print(f"Loss after Epoch {epoch} step {epoch_steps-1}: {epoch_loss/epoch_steps}")
         print(f"Loss after Epoch {epoch+1}: {epoch_loss/epoch_steps}")
         scheduler.step()
 
@@ -80,6 +82,41 @@ class ScaledModel(object):
     def set_scales(self, input_scale, output_scale):
         self.input_scale = input_scale
         self.output_scale = output_scale
+
+    def set_inputs(self, inputs):
+        self.inputs = inputs
+
+    def set_targets(self, targets):
+        self.targets = targets
+
+    def extract_inputs_from_qgmodel(self, m):
+        cache = {}
+
+        for inp, z in self.inputs:
+            if 'dqdt' in inp:
+                val = getattr(m,inp.replace('dq','dqh'))
+                cache[inp] = npfft.irfftn(val,axes=(-2,-1))
+            else:
+                cache[inp] = getattr(m,inp)
+
+        return np.array([[
+            cache[inp][z] for inp, z in self.inputs
+        ]]).astype(np.float32)
+
+    def extract_vars_from_netcdf(self, ds, features):
+        return np.vstack([
+            np.swapaxes(np.array([
+                ds.isel(run=i, lev=z)[inp].data
+                for inp, z in features
+            ]),0,1)
+            for i in range(len(ds.run))
+        ]).astype(np.float32)
+
+    def extract_inputs_from_netcdf(self, ds):
+        return self.extract_vars_from_netcdf(ds, self.inputs)
+
+    def extract_targets_from_netcdf(self, ds):
+        return self.extract_vars_from_netcdf(ds, self.targets)
 
     def predict(self, inputs, device=None):
         assert isinstance(inputs, np.ndarray)
@@ -212,7 +249,7 @@ class BasicCNN(nn.Sequential, ScaledModel):
         ]))
 
 class FullyCNN(nn.Sequential, ScaledModel):
-    def __init__(self, n_in: int = 3, n_out: int = 1, padding='same', batch_norm=True, zero_mean=False):
+    def __init__(self, inputs, targets, padding='same', batch_norm=True, zero_mean=False):
         if padding is None:
             padding_5 = 0
             padding_3 = 0
@@ -221,6 +258,10 @@ class FullyCNN(nn.Sequential, ScaledModel):
             padding_3 = 1
         else:
             raise ValueError('Unknow value for padding parameter.')
+        self.inputs = inputs
+        self.targets = targets
+        n_in = len(inputs)
+        n_out = len(targets)
         self.n_in = n_in
         self.batch_norm = batch_norm
         block1 = self._make_subblock(nn.Conv2d(n_in, 128, 5, padding=padding_5))
