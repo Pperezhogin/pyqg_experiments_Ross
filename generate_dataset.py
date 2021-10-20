@@ -194,82 +194,163 @@ def generate_forcing_dataset(nx1=256, nx2=64, dt=3600., sampling_freq=1000, samp
         m2.set_q1q2(*ds2.q.isel(time=0).copy().data)
         m2._invert()
     m2._increment_diagnostics = new_inc
-    
+
+    attr_database = dict(
+        uq_difference=dict(
+            long_name="Pre-divergence x-component of advected PV subgrid forcing, $\overline{u}\,\overline{q} - \overline{uq}$",
+            units="meters second ^-2",
+        ),
+        vq_difference=dict(
+            long_name="Pre-divergence y-component of advected PV subgrid forcing, $\overline{v}\,\overline{q} - \overline{vq}$",
+            units="meters second ^-2",
+        ),
+        q_forcing_advection=dict(
+            long_name="PV subgrid forcing computed using the advection operator, $\overline{(\mathbf{u} \cdot \nabla)q} - (\overline{\mathbf{u}} \cdot \overline{\nabla})\overline{q}$",
+            units="second ^-2",
+        ),
+        u_forcing_advection=dict(
+            long_name="x-velocity subgrid forcing computed using the advection operator, $\overline{(\mathbf{u} \cdot \nabla)u} - (\overline{\mathbf{u}} \cdot \overline{\nabla})\overline{u}$",
+            units="second ^-2",
+        ),
+        v_forcing_advection=dict(
+            long_name="y-velocity subgrid forcing computed using the advection operator, $\overline{(\mathbf{u} \cdot \nabla)v} - (\overline{\mathbf{u}} \cdot \overline{\nabla})\overline{v}$",
+            units="second ^-2",
+        ),
+        dqdt=dict(
+            long_name="Partial derivative of PV wrt. time, one step before",
+            units="second ^-2",
+        ),
+        dqdt_p=dict(
+            long_name="Partial derivative of PV wrt. time, two steps before",
+            units="second ^-2",
+        ),
+        dqdt_pp=dict(
+            long_name="Partial derivative of PV wrt. time, three steps before",
+            units="second ^-2",
+        ),
+        dqdt_post=dict(
+            long_name="Partial derivative of PV wrt. time",
+            units="second ^-2",
+        ),
+        dqdt_post_hires_downscaled=dict(
+            long_name="Partial derivative of PV wrt. time, computed from hi-res model then downscaled",
+            units="second ^-2",
+        ),
+        q_forcing_model=dict(
+            long_name="PV subgrid forcing computed as the difference between lo-res and downscaled hi-res partial derivatives of PV, $\overline{\partial_t q} - \partial_t \overline{q}$",
+            units="second ^-2"
+        ),
+    )
+
+    # Arrays to hold the datasets we'll sample over the course of the
+    # simulation 
     datasets1 = []
     datasets2 = []
 
+    # If we're sampling irregularly, pick the time index for the next sample
+    # from an exponential distribution
     if sampling_dist == 'exponential':
         next_sample = int(np.random.exponential(sampling_freq))
 
     while m1.t < m1.tmax:
         if sampling_dist == 'exponential':
+            # If we're sampling irregularly, check if we've hit the next
+            # interval
             should_sample = m1.tc >= next_sample
             if should_sample:
                 next_sample = m1.tc + int(np.random.exponential(sampling_freq))
         else:
+            # If we're sampling regularly, check if we're at that fixed
+            # interval
             should_sample = (m1.tc % sampling_freq == 0)
 
         if should_sample:
+            # Convert the high-resolution model to an xarray dataset
             ds1 = m1.to_dataset().copy(deep=True)
 
+            # Save previous partial derivatives of q wrt. time in this dataset
             derivs = ['dqdt', 'dqdt_p', 'dqdt_pp']
             for dq in derivs:
+                dqh = getattr(m1, dq.replace('dq', 'dqh'))
                 ds1[dq] = xr.DataArray(
-                    npfft.irfftn(getattr(m1, dq.replace('dq', 'dqh')), axes=(-2,-1))[np.newaxis],
-                    coords=[ds1.coords[d] for d in spatial_dims]
-                )
+                    npfft.irfftn(dqh, axes=(-2,-1))[np.newaxis],
+                    coords=[ds1.coords[d] for d in spatial_dims])
 
+            # Downscale the high-resolution dataset using our filter
             ds1_downscaled = downscaled(ds1)
-            m2.set_q1q2(*ds1_downscaled.q.isel(time=0).copy().data)
+
+            # Update the PV of the low-resolution model to match the downscaled
+            # high-resolution PV
+            downscaled_q = ds1_downscaled.q.isel(time=0).copy().data
+            m2.set_q1q2(*downscaled_q)
+            m2._invert() # recompute velocities
+
+            # Convert the low-resolution model to an xarray dataset
             ds2 = m2.to_dataset().copy(deep=True)
 
-            ds2['q_forcing_advection'] = (
-                advected(ds1_downscaled, 'q') -
-                downscaled(advected(ds1, 'q'))
-            )
-            ds2['u_forcing_advection'] = (
-                advected(ds1_downscaled, 'ufull') -
-                downscaled(advected(ds1, 'ufull'))
-            )
-            ds2['v_forcing_advection'] = (
-                advected(ds1_downscaled, 'vfull') -
-                downscaled(advected(ds1, 'vfull'))
-            )
+            # Save the downscaled versions of high-resolution previous dqdts
             for dq in derivs:
                 ds2[dq] = ds1_downscaled[dq]
 
+            # Compute various versions of the subgrid forcing defined in terms
+            # of the advection and downscaling operators
+            ds2['q_forcing_advection'] = (
+                advected(ds1_downscaled, 'q') -
+                downscaled(advected(ds1, 'q')))
+            ds2['u_forcing_advection'] = (
+                advected(ds1_downscaled, 'ufull') -
+                downscaled(advected(ds1, 'ufull')))
+            ds2['v_forcing_advection'] = (
+                advected(ds1_downscaled, 'vfull') -
+                downscaled(advected(ds1, 'vfull')))
+            ds2['uq_difference'] = (
+                ds1_downscaled.ufull * ds1_downscaled.q -
+                downscaled(ds1.ufull * ds1.q))
+            ds2['vq_difference'] = (
+                ds1_downscaled.vfull * ds1_downscaled.q -
+                downscaled(ds1.vfull * ds1.q))
+
+            # Now, step both models forward (which recomputes ∂q/∂t)
             m1._step_forward()
             m2._step_forward()
 
-            ds1_post = m1.to_dataset().copy(deep=True)
-            ds2_post = m2.to_dataset().copy(deep=True)
-
+            # Store the resulting values of ∂q/∂t
             ds1['dqdt_post'] = xr.DataArray(
                 npfft.irfftn(m1.dqhdt, axes=(-2,-1))[np.newaxis],
-                coords=[ds1.coords[d] for d in spatial_dims]
-            )
-
+                coords=[ds1.coords[d] for d in spatial_dims])
             ds2['dqdt_post'] = xr.DataArray(
                 npfft.irfftn(m2.dqhdt, axes=(-2,-1))[np.newaxis],
-                coords=[ds2.coords[d] for d in spatial_dims]
-            )
+                coords=[ds2.coords[d] for d in spatial_dims])
 
+            # On the lo-res dataset, also store the downscaled hi-res value of
+            # ∂q/∂t
             ds2['dqdt_post_hires_downscaled'] = xr.DataArray(
                 downscaled(ds1).dqdt_post.data,
-                coords=[ds2.coords[d] for d in spatial_dims]
-            )
+                coords=[ds2.coords[d] for d in spatial_dims])
 
+            # Finally, store the difference between those two quantities (which
+            # serves as an alternate measure of subgrid forcing, that takes
+            # into account other differences in the simulations beyond just
+            # hi-res vs. lo-res advection)
             ds2['q_forcing_model'] = (
-                ds2['dqdt_post_hires_downscaled'] - 
-                ds2['dqdt_post']
-            )
+                ds2['dqdt_post_hires_downscaled'] - ds2['dqdt_post'])
 
+            # Add attributes and units to the xarray dataset
+            for ds in [ds1, ds2]:
+                for key, attrs in attr_database.items():
+                    if key in ds:
+                        ds[key] = ds[key].assign_attrs(attrs)
+
+            # Save the datasets
             datasets1.append(ds1)
             datasets2.append(ds2)
         else:
+            # If we aren't sampling at this index, just step both models
+            # forward without any additional computation
             m1._step_forward()
             m2._step_forward()
     
+    # Concatenate the datasets along the time dimension
     d1 = concat_and_convert(datasets1)
     d2 = concat_and_convert(datasets2)
 
