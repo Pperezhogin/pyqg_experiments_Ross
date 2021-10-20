@@ -9,8 +9,42 @@ import numpy as np
 from scipy.stats import linregress
 import pyqg
 from pyqg.errors import DiagnosticNotFilledError
-from pyqg.diagnostic_tools import calc_ispec
 from pyqg.particles import GriddedLagrangianParticleArray2D
+from numpy import pi
+
+def calc_ispec(model, ph, lo_mult=1.5):
+    """Compute isotropic spectrum `phr` of `ph` from 2D spectrum.
+    Parameters
+    ----------
+    model : pyqg.Model instance
+        The model object from which `ph` originates
+    ph : complex array
+        The field on which to compute the variance
+    Returns
+    -------
+    kr : array
+        isotropic wavenumber
+    phr : array
+        isotropic spectrum
+    """
+
+    if model.kk.max()>model.ll.max():
+        kmax = model.ll.max()
+    else:
+        kmax = model.kk.max()
+
+    # create radial wavenumber
+    dkr = np.sqrt(model.dk**2 + model.dl**2)
+    
+    kr =  np.arange(dkr*lo_mult,kmax+dkr,dkr)
+    phr = np.zeros(kr.size)
+
+    for i in range(kr.size):
+        fkr =  (model.wv>=kr[i]-dkr/2) & (model.wv<=kr[i]+dkr/2)
+        dth = pi / (fkr.sum()-1)
+        phr[i] = ph[fkr].sum() * kr[i] * dth
+
+    return kr, phr
 
 class AnimatedPlot():
     def __init__(self, ax, func):
