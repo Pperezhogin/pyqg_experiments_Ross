@@ -93,15 +93,30 @@ def generate_parameterized_dataset(cnn0, cnn1, **kwargs):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     cnn0.to(device)
     cnn1.to(device)
-    assert cnn0.inputs == cnn1.inputs
 
     def q_parameterization(m):
-        x = cnn0.extract_inputs_from_qgmodel(m)
-        dq = np.array([
-            cnn0.predict(x, device=device)[0,0],
-            cnn1.predict(x, device=device)[0,0]
-        ]).astype(m.q.dtype)
-        return dq
+        x0 = cnn0.extract_inputs_from_qgmodel(m)
+        if cnn0.inputs == cnn1.inputs:
+            x1 = x0
+        else:
+            x1 = cnn1.extract_inputs_from_qgmodel(m)
+
+        y0 = cnn0.predict(x0, device=device)[0]
+        y1 = cnn1.predict(x1, device=device)[0]
+
+        if cnn0.targets == 'uq_difference,vq_difference':
+            ds = m.to_dataset()
+            ds['uq_difference'] = spatial_var(np.array([y0[0], y1[0]])[np.newaxis])
+            ds['vq_difference'] = spatial_var(np.array([y0[1], y1[1]])[np.newaxis])
+            ds['q_forcing_pred'] = (
+                ds.uq_difference.differentiate('x') +
+                ds.vq_difference.differentiate('y') 
+            )
+            dq = np.array(ds['q_forcing_pred'].data[0])
+        else:
+            dq = np.array([y0[0], y1[0]])
+
+        return dq.astype(m.q.dtype)
 
     return generate_control_dataset(q_parameterization=q_parameterization, **kwargs)
 

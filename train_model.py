@@ -24,6 +24,7 @@ parser.add_argument('--grad_radius', type=int, default=6)
 parser.add_argument('--num_epochs', type=int, default=100)
 parser.add_argument('--scaler', type=str, default='basic')
 parser.add_argument('--skip_datasets', type=int, default=0)
+parser.add_argument('--use_both_layers_as_input', type=int, default=0)
 args = parser.parse_args()
 
 save_dir = args.save_dir
@@ -38,19 +39,18 @@ train = train.isel(run=slice(args.skip_datasets, None))
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print(device)
 models = []
-inputs = [(feat, z) for feat in args.inputs.split(",") for z in range(2)]
-X_train = None
 
 for z in range(2):
     print(f"z={z}")
 
     targets = [(feat, z) for feat in args.target.split(",")]
+    if args.use_both_layers_as_input:
+        inputs = [(feat, zi) for feat in args.inputs.split(",") for zi in range(2)]
+    else:
+        inputs = [(feat, z) for feat in args.inputs.split(",")]
 
     model = FullyCNN(inputs, targets)
-
-    if X_train is None:
-        X_train = model.extract_inputs_from_netcdf(train)
-
+    X_train = model.extract_inputs_from_netcdf(train)
     Y_train = model.extract_targets_from_netcdf(train)
 
     print("Extracted datasets")
@@ -162,7 +162,7 @@ for j, params in enumerate(paramsets):
     with open(f"{run_dir}/pyqg_params.json", 'w') as f:
         f.write(json.dumps(params))
 
-    for i in range(4):
+    for i in range(5):
         run = generate_parameterized_dataset(cnn0, cnn1, **params)
         complex_vars = [k for k,v in run.variables.items() if v.dtype == np.complex128]
         run.drop(complex_vars).to_netcdf(os.path.join(run_dir, f"{i}.nc"))
