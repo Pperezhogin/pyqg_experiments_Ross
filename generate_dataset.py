@@ -7,10 +7,52 @@ import gcm_filters
 import numpy as np
 import xarray as xr
 import numpy.fft as npfft
+from scipy.stats import pearsonr
 from pyqg.xarray_output import spatial_dims
 dirname = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(dirname)
 from symbolic_regression_parameterization import *
+
+def time_until_uncorrelated(m1, m2, thresh=0.5, perturbation_sd=1e-10, max_timesteps=100000):
+    def possibly_downscaled_q(m):
+        scale = m1.nx // m2.nx
+        if scale == 1:
+            return m1.q
+        else:
+            ds = m.to_dataset().isel(time=-1)
+            filter = gcm_filters.Filter(filter_scale=scale, dx_min=1, grid_type=gcm_filters.GridType.REGULAR)
+            downscaled = filter.apply(ds, dims=['y','x']).coarsen(x=scale, y=scale).mean()
+            return downscaled.q.data
+        
+    def correlation(qa, qb):
+        return pearsonr(qa.ravel(), qb.ravel())[0]
+    
+    for _ in range(3):
+        m2.set_q1q2(*possibly_downscaled_q(m1))
+        m1._step_forward()
+        m2._step_forward()
+        
+    initial_conditions = possibly_downscaled_q(m1)
+    perturbed_conditions = initial_conditions + np.random.normal(size=initial_conditions.shape) * perturbation_sd
+    
+    assert correlation(initial_conditions, perturbed_conditions) > 0.9
+    
+    m2.set_q1q2(*perturbed_conditions)
+    
+    steps = 0
+    corrs = []
+    
+    while steps < max_timesteps:
+        m1._step_forward()
+        m2._step_forward() 
+        steps += 1
+        corr = correlation(m2.q, possibly_downscaled_q(m1))
+        if steps % 100 == 0:
+            corrs.append(corr)
+        if corr <= thresh:
+            break
+    
+    return np.array(corrs), steps
 
 def zb2020_uv_parameterization(m, factor_upper=-62261027.5, factor_lower=-54970158.2):
     # Implements Equation 6 of
@@ -88,6 +130,23 @@ def generate_physically_parameterized_dataset(factor_upper=-19723861.3, factor_l
     uv_param = lambda m: zb2020_uv_parameterization(m, factor_upper=factor_upper, factor_lower=factor_lower)
     return generate_control_dataset(uv_parameterization=uv_param, **kwargs)
 
+def initialize_parameterized_model(cnn0, cnn1, **kwargs):
+    import torch
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    cnn0.to(device)
+    cnn1.to(device)
+    assert cnn0.inputs == cnn1.inputs
+
+    def q_parameterization(m):
+        x = cnn0.extract_inputs_from_qgmodel(m)
+        dq = np.array([
+            cnn0.predict(x, device=device)[0,0],
+            cnn1.predict(x, device=device)[0,0]
+        ]).astype(m.q.dtype)
+        return dq
+
+    return initialize_pyqg_model(q_parameterization=q_parameterization, **kwargs)
+
 def generate_parameterized_dataset(cnn0, cnn1, **kwargs):
     import torch
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -160,13 +219,14 @@ def concat_and_convert(datasets):
 
     return d.drop(complex_vars)
 
-def generate_control_dataset(nx=64, dt=3600., sampling_freq=1000, sampling_dist='uniform', after_each=None, **kwargs):
+def initialize_pyqg_model(nx=64, dt=3600., **kwargs):
     year = 24*60*60*360.
-    pyqg_kwargs = dict(tmax=10*year, dt=dt)
+    pyqg_kwargs = dict(tmax=10*year)
     pyqg_kwargs.update(**kwargs)
     pyqg_kwargs['tavestart'] = pyqg_kwargs['tmax'] * 0.5
+    return pyqg.QGModel(nx=nx, dt=dt, **pyqg_kwargs)
 
-    m = pyqg.QGModel(nx=nx, **pyqg_kwargs)
+def generate_simulation_dataset(m, sampling_freq=1000, sampling_dist='uniform', after_each=None):
     datasets = []
 
     while m.t < m.tmax:
@@ -178,6 +238,10 @@ def generate_control_dataset(nx=64, dt=3600., sampling_freq=1000, sampling_dist=
             after_each(m)
 
     return concat_and_convert(datasets)
+
+def generate_control_dataset(nx=64, dt=3600., sampling_freq=1000, sampling_dist='uniform', after_each=None, **kwargs):
+    m = initialize_pyqg_model(nx=nx, dt=dt, **kwargs)
+    return generate_simulation_dataset(m, sampling_freq=1000, sampling_dist='uniform', after_each=None)
 
 def generate_forcing_dataset(nx1=256, nx2=64, dt=3600., sampling_freq=1000, sampling_dist='uniform', filter=None, **kwargs):
     scale = nx1//nx2
@@ -232,15 +296,15 @@ def generate_forcing_dataset(nx1=256, nx2=64, dt=3600., sampling_freq=1000, samp
             units="meters second ^-2",
         ),
         q_forcing_advection=dict(
-            long_name="PV subgrid forcing computed using the advection operator, $\overline{(\mathbf{u} \cdot \nabla)q} - (\overline{\mathbf{u}} \cdot \overline{\nabla})\overline{q}$",
+            long_name="PV subgrid forcing computed using the advection operator, $\overline{(\mathbf{u} \cdot \\nabla)q} - (\overline{\mathbf{u}} \cdot \overline{\\nabla})\overline{q}$",
             units="second ^-2",
         ),
         u_forcing_advection=dict(
-            long_name="x-velocity subgrid forcing computed using the advection operator, $\overline{(\mathbf{u} \cdot \nabla)u} - (\overline{\mathbf{u}} \cdot \overline{\nabla})\overline{u}$",
+            long_name="x-velocity subgrid forcing computed using the advection operator, $\overline{(\mathbf{u} \cdot \\nabla)u} - (\overline{\mathbf{u}} \cdot \overline{\\nabla})\overline{u}$",
             units="second ^-2",
         ),
         v_forcing_advection=dict(
-            long_name="y-velocity subgrid forcing computed using the advection operator, $\overline{(\mathbf{u} \cdot \nabla)v} - (\overline{\mathbf{u}} \cdot \overline{\nabla})\overline{v}$",
+            long_name="y-velocity subgrid forcing computed using the advection operator, $\overline{(\mathbf{u} \cdot \\nabla)v} - (\overline{\mathbf{u}} \cdot \overline{\\nabla})\overline{v}$",
             units="second ^-2",
         ),
         dqdt=dict(

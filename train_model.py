@@ -144,7 +144,7 @@ for f in glob.glob(f"{args.test_dir}/*/lores.nc"):
         mean_sq_err=xr.DataArray(mses, **coord_kwargs('lev','time')),
     )).to_netcdf(f"{save_dir}/test/{run_idx}/preds.nc")
 
-from generate_dataset import generate_parameterized_dataset
+from generate_dataset import *
 
 year = 24*60*60*360.
 
@@ -166,3 +166,13 @@ for j, params in enumerate(paramsets):
         run = generate_parameterized_dataset(cnn0, cnn1, **params)
         complex_vars = [k for k,v in run.variables.items() if v.dtype == np.complex128]
         run.drop(complex_vars).to_netcdf(os.path.join(run_dir, f"{i}.nc"))
+
+    m1 = initialize_pyqg_model(nx=256, **params)
+    m1.run()
+
+    m2 = initialize_parameterized_model(cnn0, cnn1, **params)
+
+    corrs, steps = time_until_uncorrelated(m1, m2)
+
+    with open(f"{run_dir}/decorrelation_timesteps", 'w') as f:
+        f.write(str(steps))
