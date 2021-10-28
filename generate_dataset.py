@@ -135,23 +135,6 @@ def initialize_parameterized_model(cnn0, cnn1, **kwargs):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     cnn0.to(device)
     cnn1.to(device)
-    assert cnn0.inputs == cnn1.inputs
-
-    def q_parameterization(m):
-        x = cnn0.extract_inputs_from_qgmodel(m)
-        dq = np.array([
-            cnn0.predict(x, device=device)[0,0],
-            cnn1.predict(x, device=device)[0,0]
-        ]).astype(m.q.dtype)
-        return dq
-
-    return initialize_pyqg_model(q_parameterization=q_parameterization, **kwargs)
-
-def generate_parameterized_dataset(cnn0, cnn1, **kwargs):
-    import torch
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    cnn0.to(device)
-    cnn1.to(device)
     
     def eval_models(m):
         x0 = cnn0.extract_inputs_from_qgmodel(m)
@@ -169,12 +152,10 @@ def generate_parameterized_dataset(cnn0, cnn1, **kwargs):
             du = np.array([y0[0], y1[0]]).astype(m.q.dtype)
             dv = np.array([y0[1], y1[1]]).astype(m.q.dtype)
             return du, dv
-
-        return generate_control_dataset(uv_parameterization=uv_parameterization, **kwargs)
+        kwargs['uv_parameterization'] = uv_parameterization
     else:
         def q_parameterization(m):
             y0, y1 = eval_models(m)
-
             if cnn0.targets == [('uq_difference', 0), ('vq_difference', 0)]:
                 ds = m.to_dataset()
                 ds['uq_difference'] = spatial_var(np.array([y0[0], y1[0]])[np.newaxis])
@@ -188,8 +169,9 @@ def generate_parameterized_dataset(cnn0, cnn1, **kwargs):
                 dq = np.array([y0[0], y1[0]])
 
             return dq.astype(m.q.dtype)
+        kwargs['q_parameterization'] = q_parameterization
 
-        return generate_control_dataset(q_parameterization=q_parameterization, **kwargs)
+    return initialize_pyqg_model(**kwargs)
 
 def spatial_var(var, ds):
     return xr.DataArray(var, coords=dict([(d, ds.coords[d]) for d in spatial_dims]), dims=spatial_dims)
@@ -242,6 +224,10 @@ def generate_simulation_dataset(m, sampling_freq=1000, sampling_dist='uniform', 
 def generate_control_dataset(nx=64, dt=3600., sampling_freq=1000, sampling_dist='uniform', after_each=None, **kwargs):
     m = initialize_pyqg_model(nx=nx, dt=dt, **kwargs)
     return generate_simulation_dataset(m, sampling_freq=1000, sampling_dist='uniform', after_each=None)
+
+def generate_parameterized_dataset(cnn0, cnn1, **kwargs):
+    m = initialize_parameterized_model(cnn0, cnn1, **kwargs)
+    return generate_simulation_dataset(m)
 
 def generate_forcing_dataset(nx1=256, nx2=64, dt=3600., sampling_freq=1000, sampling_dist='uniform', filter=None, **kwargs):
     scale = nx1//nx2
