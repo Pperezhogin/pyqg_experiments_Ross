@@ -12,7 +12,7 @@ dirname = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(dirname)
 from symbolic_regression_parameterization import *
 
-def zb2020_uv_parameterization(m, factor_upper=-19723861.3, factor_lower=-32358493.6):
+def zb2020_uv_parameterization(m, factor_upper=-62261027.5, factor_lower=-54970158.2):
     # Implements Equation 6 of
     # https://laurezanna.github.io/files/Zanna-Bolton-2020.pdf with default
     # factors tuned to (a particular configuration of) pyqg.
@@ -43,7 +43,7 @@ def zb2020_uv_parameterization(m, factor_upper=-19723861.3, factor_lower=-323584
             + ds.stretching_deformation**2
         ).differentiate('y')  
     )
-
+    
     return np.array(du.data), np.array(dv.data)
 
 def generate_ag7531_parameterized_dataset(factor=1.0, **kwargs):
@@ -93,8 +93,8 @@ def generate_parameterized_dataset(cnn0, cnn1, **kwargs):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     cnn0.to(device)
     cnn1.to(device)
-
-    def q_parameterization(m):
+    
+    def eval_models(m):
         x0 = cnn0.extract_inputs_from_qgmodel(m)
         if cnn0.inputs == cnn1.inputs:
             x1 = x0
@@ -104,21 +104,33 @@ def generate_parameterized_dataset(cnn0, cnn1, **kwargs):
         y0 = cnn0.predict(x0, device=device)[0]
         y1 = cnn1.predict(x1, device=device)[0]
 
-        if cnn0.targets == 'uq_difference,vq_difference':
-            ds = m.to_dataset()
-            ds['uq_difference'] = spatial_var(np.array([y0[0], y1[0]])[np.newaxis])
-            ds['vq_difference'] = spatial_var(np.array([y0[1], y1[1]])[np.newaxis])
-            ds['q_forcing_pred'] = (
-                ds.uq_difference.differentiate('x') +
-                ds.vq_difference.differentiate('y') 
-            )
-            dq = np.array(ds['q_forcing_pred'].data[0])
-        else:
-            dq = np.array([y0[0], y1[0]])
+    if cnn0.targets == [('u_forcing_advection', 0), ('v_forcing_advection', 0)]:
+        def uv_parameterization(m):
+            y0, y1 = eval_models(m)
+            du = np.array([y0[0], y1[0]]).astype(m.q.dtype)
+            dv = np.array([y0[1], y1[1]]).astype(m.q.dtype)
+            return du, dv
 
-        return dq.astype(m.q.dtype)
+        return generate_control_dataset(uv_parameterization=uv_parameterization, **kwargs)
+    else:
+        def q_parameterization(m):
+            y0, y1 = eval_models(m)
 
-    return generate_control_dataset(q_parameterization=q_parameterization, **kwargs)
+            if cnn0.targets == [('uq_difference', 0), ('vq_difference', 0)]:
+                ds = m.to_dataset()
+                ds['uq_difference'] = spatial_var(np.array([y0[0], y1[0]])[np.newaxis])
+                ds['vq_difference'] = spatial_var(np.array([y0[1], y1[1]])[np.newaxis])
+                ds['q_forcing_pred'] = (
+                    ds.uq_difference.differentiate('x') +
+                    ds.vq_difference.differentiate('y') 
+                )
+                dq = np.array(ds['q_forcing_pred'].data[0])
+            else:
+                dq = np.array([y0[0], y1[0]])
+
+            return dq.astype(m.q.dtype)
+
+        return generate_control_dataset(q_parameterization=q_parameterization, **kwargs)
 
 def spatial_var(var, ds):
     return xr.DataArray(var, coords=dict([(d, ds.coords[d]) for d in spatial_dims]), dims=spatial_dims)
