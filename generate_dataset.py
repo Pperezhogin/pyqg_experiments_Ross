@@ -145,6 +145,7 @@ def initialize_parameterized_model(cnn0, cnn1, **kwargs):
 
         y0 = cnn0.predict(x0, device=device)[0]
         y1 = cnn1.predict(x1, device=device)[0]
+        return y0, y1
 
     if cnn0.targets == [('u_forcing_advection', 0), ('v_forcing_advection', 0)]:
         def uv_parameterization(m):
@@ -158,8 +159,8 @@ def initialize_parameterized_model(cnn0, cnn1, **kwargs):
             y0, y1 = eval_models(m)
             if cnn0.targets == [('uq_difference', 0), ('vq_difference', 0)]:
                 ds = m.to_dataset()
-                ds['uq_difference'] = spatial_var(np.array([y0[0], y1[0]])[np.newaxis])
-                ds['vq_difference'] = spatial_var(np.array([y0[1], y1[1]])[np.newaxis])
+                ds['uq_difference'] = spatial_var(np.array([y0[0], y1[0]])[np.newaxis], ds)
+                ds['vq_difference'] = spatial_var(np.array([y0[1], y1[1]])[np.newaxis], ds)
                 ds['q_forcing_pred'] = (
                     ds.uq_difference.differentiate('x') +
                     ds.vq_difference.differentiate('y') 

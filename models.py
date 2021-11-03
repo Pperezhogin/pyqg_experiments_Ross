@@ -94,7 +94,7 @@ class ScaledModel(object):
 
         for inp, z in self.inputs:
             if 'dqdt' in inp:
-                val = getattr(m,inp.replace('dq','dqh'))
+                val = getattr(m,inp.replace('dq','dqh').replace('_post', ''))
                 cache[inp] = npfft.irfftn(val,axes=(-2,-1))
             else:
                 cache[inp] = getattr(m,inp)
