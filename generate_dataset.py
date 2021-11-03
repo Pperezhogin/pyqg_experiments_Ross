@@ -3,7 +3,6 @@ import sys
 import glob
 import pyqg
 import pickle
-import gcm_filters
 import numpy as np
 import xarray as xr
 import numpy.fft as npfft
@@ -12,6 +11,7 @@ from pyqg.xarray_output import spatial_dims
 dirname = os.path.dirname(os.path.realpath(__file__))
 
 def time_until_uncorrelated(m1, m2, thresh=0.5, perturbation_sd=1e-10, max_timesteps=100000):
+    import gcm_filters
     def possibly_downscaled_q(m):
         scale = m1.nx // m2.nx
         if scale == 1:
@@ -239,6 +239,7 @@ def generate_forcing_dataset(nx1=256, nx2=64, dt=3600., sampling_freq=1000, samp
     pyqg_kwargs['tavestart'] = pyqg_kwargs['tmax'] * 0.5
     
     if filter is None:
+        import gcm_filters
         filter = gcm_filters.Filter(filter_scale=scale, dx_min=1, grid_type=gcm_filters.GridType.REGULAR)
 
     def downscaled(ds):
