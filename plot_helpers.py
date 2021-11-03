@@ -470,13 +470,13 @@ def plot_energy_budget(run):
     plt.xlabel("$k$ ($m^{-1}$)")
     return mean_budget
 
-def kdeplot(data, **kw):
+def kdeplot(data_, **kw):
+    data = np.array(data_)
     kde = gaussian_kde(data)
-    lo, hi = np.percentile(data, [5, 95])
+    lo, hi = np.percentile(data.ravel(), [5, 95])
     diff = (hi-lo)
     lims = np.linspace(lo - diff*0.1, hi + diff*0.1, 200)
     plt.plot(lims, kde(lims), **kw)
-    plt.xlim(lo - diff*0.1, hi + diff*0.1)
     plt.yticks([])
     plt.ylabel('Density')
 
@@ -511,8 +511,9 @@ def compare_simulations(ds1, ds2, directory=None, new_fontsize=16):
 
     layers = range(len(ds1.lev))
 
-    def imshow(x):
-        vmax = np.percentile(np.abs(x), 99)*1.01
+    def imshow(x_):
+        x = np.array(x_)
+        vmax = np.percentile(np.abs(x).ravel(), 99)*1.01
         if x.min() < 0:
             cmap = 'bwr'
             vmin = -vmax
@@ -551,7 +552,7 @@ def compare_simulations(ds1, ds2, directory=None, new_fontsize=16):
             for quantity in quantities:
                 distributions = [ds[quantity].isel(lev=z, time=-1).data.ravel() for ds in datasets]
                 distance = wasserstein_distance(*distributions)
-                comparisons[f"{quantity}_wasserstein_distance"][z] = distance
+                comparisons[f"{quantity}_wasserstein_distance_z{z}"] = distance
                 g.next(title=f"{quantity}, z={z} (D={distance:.1e})")
                 for ds, dist in zip(datasets, distributions):
                     kdeplot(dist, **ds.attrs['plot_kwargs'])
@@ -572,13 +573,13 @@ def compare_simulations(ds1, ds2, directory=None, new_fontsize=16):
                     for z in layers:
                         g.next(title=f"{k}, z={z}\n({ds1[k].attrs['long_name']})")
                         slopes, curves = plot_spectra(k, datasets, z=z)
-                        comparisons[f"{k}_slope_difference"][z] = slopes[1] - slopes[0]
-                        comparisons[f"{k}_curve_difference"][z] = np.mean((curves[1] - curves[0])**2)
+                        comparisons[f"{k}_slope_difference_z{z}"] = slopes[1] - slopes[0]
+                        comparisons[f"{k}_curve_difference_z{z}"] = np.mean((curves[1] - curves[0])**2)
                 else:
                     g.next(title=f"{k}, barotropic\n({ds1[k].attrs['long_name']})")
                     slopes, curves = plot_spectra(k, datasets)
-                    comparisons[f"{k}_slope_difference"] = slopes[1] - slopes[0]
-                    comparisons[f"{k}_curve_difference"] = np.mean((curves[1] - curves[0])**2)
+                    comparisons[f"{k}_slope_difference_bar"] = slopes[1] - slopes[0]
+                    comparisons[f"{k}_curve_difference_bar"] = np.mean((curves[1] - curves[0])**2)
 
     with figure_grid(rows=1, cols=len(datasets), rowwidth=16, rowheight=8, filename=filename_for("energy_budgets")) as g:
         g.title("Spectral energy budgets")
@@ -610,6 +611,15 @@ def plot_spectra(quantity, runs, ax=None, z=None, log=True, leg=True, xlim=None,
         s = np.array(s_vals)
         if s.min() < 0:
             log = False
+
+    for r in runs:
+        if quantity not in r: continue
+        s_vals = []
+        line = None
+        for i in range(len(r.run)):
+            k,s = power_spectrum(quantity, r.isel(run=i), z=z)
+            s_vals.append(s)                
+        s = np.array(s_vals)
         plot_fn = ax.loglog if log else ax.semilogx
         maxes.append(s.max())
         q = np.percentile(s,50,axis=0)

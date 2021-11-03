@@ -13,6 +13,7 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('--train_dir', type=str, default="/scratch/zanna/data/pyqg/datasets/train")
 parser.add_argument('--test_dir', type=str, default="/scratch/zanna/data/pyqg/datasets/test")
+parser.add_argument('--transfer_dir', type=str, default="/scratch/zanna/data/pyqg/datasets/transfer")
 parser.add_argument('--save_dir', type=str)
 parser.add_argument('--inputs', type=str, default="u,v,q")
 parser.add_argument('--target', type=str, default="q_forcing_advection")
@@ -50,10 +51,6 @@ for z in range(2):
         inputs = [(feat, z) for feat in args.inputs.split(",")]
 
     model = FullyCNN(inputs, targets)
-    X_train = model.extract_inputs_from_netcdf(train)
-    Y_train = model.extract_targets_from_netcdf(train)
-
-    print("Extracted datasets")
 
     model_path = f"{save_dir}/model_z{z}"
 
@@ -61,6 +58,9 @@ for z in range(2):
         model.load(model_path)
         model.to(device)
     else:
+        X_train = model.extract_inputs_from_netcdf(train)
+        Y_train = model.extract_targets_from_netcdf(train)
+        print("Extracted datasets")
         model.to(device)
 
         if args.scaler == 'logpow':
@@ -86,6 +86,8 @@ for z in range(2):
 
         if args.zero_mean:
             model.set_zero_mean(True)
+        else:
+            model.set_zero_mean(False)
         model.set_scales(X_scale, Y_scale)
 
         num_epochs = args.num_epochs
@@ -162,17 +164,35 @@ for j, params in enumerate(paramsets):
     with open(f"{run_dir}/pyqg_params.json", 'w') as f:
         f.write(json.dumps(params))
 
+    if not os.path.exists(f"{run_dir}/decorrelation_timesteps"):
+        m1 = initialize_pyqg_model(nx=256, **params)
+        m1.run()
+        m2 = initialize_parameterized_model(cnn0, cnn1, **params)
+        corrs, steps = time_until_uncorrelated(m1, m2)
+        with open(f"{run_dir}/decorrelation_timesteps", 'w') as f:
+            f.write(str(steps))
+
     for i in range(5):
-        run = generate_parameterized_dataset(cnn0, cnn1, **params)
-        complex_vars = [k for k,v in run.variables.items() if v.dtype == np.complex128]
-        run.drop(complex_vars).to_netcdf(os.path.join(run_dir, f"{i}.nc"))
+        if not os.path.exists(os.path.join(run_dir, f"{i}.nc")):
+            run = generate_parameterized_dataset(cnn0, cnn1, **params)
+            complex_vars = [k for k,v in run.variables.items() if v.dtype == np.complex128]
+            run.drop(complex_vars).to_netcdf(os.path.join(run_dir, f"{i}.nc"))
 
-    m1 = initialize_pyqg_model(nx=256, **params)
-    m1.run()
+    ds = xr.open_mfdataset(f"{run_dir}/*.nc", concat_dim="run", combine="nested").assign_attrs(
+        plot_kwargs=dict(label=f"Lo-res, parameterized ({args.save_dir.split('/')[-2]})")
+    )
+    if j == 0:
+        comp = xr.open_mfdataset(f"{args.test_dir}/*/lores.nc", combine="nested", concat_dim="run")
+    else:
+        comp = xr.open_mfdataset(f"{args.transfer_dir}/*/lores.nc", combine="nested", concat_dim="run")
 
-    m2 = initialize_parameterized_model(cnn0, cnn1, **params)
+    comp = comp.assign_attrs(
+        plot_kwargs=dict(label="Hi-res, downscaled")
+    )
 
-    corrs, steps = time_until_uncorrelated(m1, m2)
+    import plot_helpers
 
-    with open(f"{run_dir}/decorrelation_timesteps", 'w') as f:
-        f.write(str(steps))
+    metrics = plot_helpers.compare_simulations(comp, ds, directory=run_dir)
+
+    with open(f"{run_dir}/differences_wrt_downscaled_hires.json", 'w') as f:
+        f.write(json.dumps(metrics))
