@@ -10,8 +10,6 @@ import numpy.fft as npfft
 from scipy.stats import pearsonr
 from pyqg.xarray_output import spatial_dims
 dirname = os.path.dirname(os.path.realpath(__file__))
-sys.path.append(dirname)
-from symbolic_regression_parameterization import *
 
 def time_until_uncorrelated(m1, m2, thresh=0.5, perturbation_sd=1e-10, max_timesteps=100000):
     def possibly_downscaled_q(m):
@@ -116,6 +114,8 @@ def generate_symbolic_regression_parameterized_dataset(
         m2_path=f"{dirname}/models/lower_layer_symbolic_regression_parameterization.pkl",
         factor=1.0,
         **kwargs):
+    sys.path.append(dirname)
+    from symbolic_regression_parameterization import *
     with open(m1_path, 'rb') as f: upper = pickle.load(f)
     with open(m2_path, 'rb') as f: lower = pickle.load(f)
 
