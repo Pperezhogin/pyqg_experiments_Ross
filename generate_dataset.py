@@ -311,6 +311,10 @@ def generate_forcing_dataset(nx1=256, nx2=64, dt=3600., sampling_freq=1000, samp
             long_name="Partial derivative of PV wrt. time",
             units="second ^-2",
         ),
+        DqDt_post=dict(
+            long_name="Material derivative of PV wrt. time",
+            units="second ^-2",
+        ),
         dqdt_post_hires_downscaled=dict(
             long_name="Partial derivative of PV wrt. time, computed from hi-res model then downscaled",
             units="second ^-2",
@@ -373,15 +377,14 @@ def generate_forcing_dataset(nx1=256, nx2=64, dt=3600., sampling_freq=1000, samp
 
             # Compute various versions of the subgrid forcing defined in terms
             # of the advection and downscaling operators
-            ds2['q_forcing_advection'] = (
-                advected(ds1_downscaled, 'q') -
-                downscaled(advected(ds1, 'q')))
-            ds2['u_forcing_advection'] = (
-                advected(ds1_downscaled, 'ufull') -
-                downscaled(advected(ds1, 'ufull')))
-            ds2['v_forcing_advection'] = (
-                advected(ds1_downscaled, 'vfull') -
-                downscaled(advected(ds1, 'vfull')))
+
+            ds2['advected_q'] = advected(ds2, 'q')
+            ds2['advected_ufull'] = advected(ds2, 'ufull')
+            ds2['advected_vfull'] = advected(ds2, 'vfull')
+
+            ds2['q_forcing_advection'] = ds2['advected_q'] - downscaled(advected(ds1, 'q'))
+            ds2['u_forcing_advection'] = ds2['advected_ufull'] - downscaled(advected(ds1, 'ufull'))
+            ds2['v_forcing_advection'] = ds2['advected_vfull'] - downscaled(advected(ds1, 'vfull'))
             ds2['uq_difference'] = (
                 ds1_downscaled.ufull * ds1_downscaled.q -
                 downscaled(ds1.ufull * ds1.q))
@@ -400,6 +403,8 @@ def generate_forcing_dataset(nx1=256, nx2=64, dt=3600., sampling_freq=1000, samp
             ds2['dqdt_post'] = xr.DataArray(
                 npfft.irfftn(m2.dqhdt, axes=(-2,-1))[np.newaxis],
                 coords=[ds2.coords[d] for d in spatial_dims])
+
+            ds2['DqDt_post'] = ds2['dqdt_post'] + ds2['advected_q']
 
             # On the lo-res dataset, also store the downscaled hi-res value of
             # ∂q/∂t
