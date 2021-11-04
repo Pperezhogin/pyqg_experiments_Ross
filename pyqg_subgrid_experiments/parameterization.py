@@ -2,14 +2,25 @@ import os
 import glob
 import numpy as np
 from pyqg_subgrid_experiments.models import FullyCNN
+from pyqg_subgrid_experiments.simulation import initialize_pyqg_model
 
 class Parameterization(object):
+    def __call__(self, m):
+        pass
+
+    def initialize_pyqg_model(self, **params):
+        pass
+
+class CNNParameterization(object):
     def __init__(self, directory, models=None, model_class=FullyCNN):
         self.directory = directory
         self.models = models if models is not None else [
             model_class.load(f)
             for f in glob.glob(os.path.join(directory, "models/*"))
         ]
+
+    def initialize_pyqg_model(self, **params):
+        pass
 
     def predict(self, m):
         preds = []
