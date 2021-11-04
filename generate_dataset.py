@@ -115,7 +115,7 @@ def generate_symbolic_regression_parameterized_dataset(
         factor=1.0,
         **kwargs):
     sys.path.append(dirname)
-    from symbolic_regression_parameterization import *
+    from symbolic_regression_parameterization import SymbolicRegressionParameterization
     with open(m1_path, 'rb') as f: upper = pickle.load(f)
     with open(m2_path, 'rb') as f: lower = pickle.load(f)
 
@@ -126,7 +126,7 @@ def generate_symbolic_regression_parameterized_dataset(
 
     return generate_control_dataset(q_parameterization=q_parameterization, **kwargs)
 
-def generate_physically_parameterized_dataset(factor_upper=-19723861.3, factor_lower=-32358493.6, **kwargs):
+def generate_physically_parameterized_dataset(factor_upper=-62261027.5, factor_lower=-54970158.2, **kwargs):
     uv_param = lambda m: zb2020_uv_parameterization(m, factor_upper=factor_upper, factor_lower=factor_lower)
     return generate_control_dataset(uv_parameterization=uv_param, **kwargs)
 
