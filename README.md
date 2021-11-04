@@ -109,7 +109,7 @@ baseline_dataset = generate_dataset(**sim_params)
 
 Ideally, parameterized low-resolution simulations should be statistically similar to downscaled high-resolution simulations (or at least more statistically similar than unparameterized low-resolution simulations). We provide a number of metrics for quantifying this kind of similarity:
 
-```
+```python
 import xarray as xr
 from pyqg_subgrid_experiments.metrics import compare_simulations
 from pyqg_subgrid_experiments.plot_helpers import visualize_simulations
@@ -136,7 +136,9 @@ In addition to the [variables saved by pyqg](https://github.com/asross/pyqg/blob
 
 ### `u_forcing_advection` and `v_forcing_advection`
 
-TODO
+![img](https://latex.codecogs.com/gif.latex?%28%5Cmathbf%7Bu%7D%20%5Ccdot%20%5Cnabla%29%5Cmathbf%7Bu%7D)
+
+These are the traditional
 
 ### `q_forcing_advection`
 
