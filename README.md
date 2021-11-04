@@ -136,26 +136,38 @@ In addition to the [variables saved by pyqg](https://github.com/asross/pyqg/blob
 
 ### `u_forcing_advection` and `v_forcing_advection`
 
-![img](https://latex.codecogs.com/gif.latex?%28%5Cmathbf%7Bu%7D%20%5Ccdot%20%5Cnabla%29%5Cmathbf%7Bu%7D)
+These variables are finite difference approximations of the x- and y-components (respectively) of the velocity subgrid forcing specifically due to unresolved advection:
 
-These are the traditional
+![img](https://latex.codecogs.com/gif.latex?%28%5Coverline%7B%5Cmathbf%7Bu%7D%7D%20%5Ccdot%20%5Cnabla%29%5Coverline%7B%5Cmathbf%7Bu%7D%7D%20-%20%5Coverline%7B%28%5Cmathbf%7Bu%7D%20%5Ccdot%20%5Cnabla%29%5Cmathbf%7Bu%7D%7D)
 
 ### `q_forcing_advection`
 
-TODO
+This variable is a finite difference approximation of the subgrid forcing of potential vorticity due to unresolved advection:
+
+![img](https://latex.codecogs.com/gif.latex?%28%5Coverline%7B%5Cmathbf%7Bu%7D%7D%20%5Ccdot%20%5Cnabla%29%5Coverline%7Bq%7D%20-%20%5Coverline%7B%28%5Cmathbf%7Bu%7D%20%5Ccdot%20%5Cnabla%29q%7D)
 
 ### `uq_difference` and `vq_difference`
 
-TODO
+These variables are x- and y-components of
+
+![img](https://latex.codecogs.com/gif.latex?%5Coverline%7B%5Cmathbf%7Bu%7D%7D%5C%2C%5Coverline%7Bq%7D%20-%20%5Coverline%7B%5Cmathbf%7Bu%7Dq%7D)
+
+The divergence of this term should equal the advection-based subgrid forcing of potential vorticity.
 
 ### `q_forcing_empirical`
 
-TODO
+In pyqg, the potential vorticity tendency equations include a [small-scale dissipation term whose effects depend on grid resolution](https://pyqg.readthedocs.io/en/latest/equations/notation_twolayer_model.html#marching-forward). This means that the high- and low-resolution tendencies will not only differ because of unresolved advection, but also explicitly different dissipation. As such, we also save the empirical difference between the high- and low-resolution tendencies as an alternate prediction target:
 
-### Various versions of `dqdt`
+![img](https://latex.codecogs.com/gif.latex?%5Coverline%7B%5Cpartial_t%20q%7D%20-%20%5Cpartial_t%20%5Coverline%7Bq%7D)
 
-TODO
+### Various versions of ∂q/∂t
 
+The dataset contains a number of `dqdt` terms which each have different highly specific meanings that might be easy to confuse. Here we clarify:
+
+- `dqdt_post` is the value of ∂q/∂t computed by the low-resolution model based on the downscaled high-resolution initial state `q`.
+- `dqdt_post_hires_downscaled` is the (downscaled) value of ∂q/∂t computed by the high-resolution model based on its initial state.
+- `dqdt_pre_hires_downscaled` is the high resolution model's _previous_ value of ∂q/∂t (again downscaled) which helped produce `q`.
+- `dqdt` is the low resolution model's previous value of ∂q/∂t, which did not actually produce `q` (as `q` is overwritten before the time step corresponding to each snapshot)
 
 ## Pregenerated datasets
 
