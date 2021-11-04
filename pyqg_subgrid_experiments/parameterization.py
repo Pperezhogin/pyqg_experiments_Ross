@@ -4,33 +4,32 @@ import numpy as np
 from pyqg_subgrid_experiments.models import FullyCNN
 
 class Parameterization(object):
-    def __init__(self, models):
-        self.models = models
+    def __init__(self, directory, models=None, model_class=FullyCNN):
+        self.directory = directory
+        self.models = models if models is not None else [
+            model_class.load(f)
+            for f in glob.glob(os.path.join(directory, "models/*"))
+        ]
 
     def predict(self, m):
         preds = []
-        for m in self.models:
+        for model in self.models:
             pred = model.predict(m)
             assert len(pred.shape) == 4
-            assert len(pred.shape[1]) == len(model.targets)
-            for channel in pred.shape[1]:
+            assert len(model.targets) == pred.shape[1]
+            for channel in range(pred.shape[1]):
                 z = model.targets[channel][1]
                 assert z == len(preds)
                 preds.append(pred[:,channel,:,:])
-        return np.swapaxes(np.array(preds), 0, 1)
+        preds = np.swapaxes(np.array(preds), 0, 1)
+        if len(preds) == 1: preds = preds[0]
+        return preds
 
     def __call__(self, m):
         return self.predict(m)
 
     @classmethod
-    def load(cls, directory, model_class=FullyCNN):
-        return cls([
-            model_class.load(f)
-            for f in glob.glob(os.path.join(directory, "models/*"))
-        ])
-
-    @classmethod
-    def train_on(cls, dataset, save_to,
+    def train_on(cls, dataset, directory,
             inputs=['q','u','v'],
             targets=['q_forcing_advection'],
             layerwise_inputs=None,
@@ -77,12 +76,15 @@ class Parameterization(object):
             X = model.extract_inputs(dataset)
             Y = model.extract_targets(dataset)
             model.fit(X, Y, num_epochs=num_epochs, **kw)
-            model.save(f"{save_to}/models/{z}")
+            model.save(os.path.join(directory, f"models/{z}"))
 
         # Return the trained parameterization
-        return cls(models)
+        return cls(directory, models=models)
 
     def test_on(self, dataset):
-        pass
+        preds = self.predict(dataset)
+
+        import pdb; pdb.set_trace()
+
 
 

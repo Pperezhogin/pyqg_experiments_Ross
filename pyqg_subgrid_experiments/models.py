@@ -10,22 +10,20 @@ import xarray as xr
 from collections import OrderedDict
 from sklearn.isotonic import IsotonicRegression
 
-def minibatch(inputs, targets, batch_size=64, as_tensor=True):
-    assert len(inputs) == len(targets)
-    order = np.arange(len(inputs))
+def minibatch(*arrays, batch_size=64, as_tensor=True):
+    assert len(set([len(a) for a in arrays])) == 1
+    order = np.arange(len(arrays[0]))
     np.random.shuffle(order)
-    steps = int(np.ceil(len(inputs) / batch_size))
+    steps = int(np.ceil(len(arrays[0]) / batch_size))
     xform = torch.as_tensor if as_tensor else lambda x: x
     for step in range(steps):
         idx = order[step*batch_size:(step+1)*batch_size]
-        x = xform(inputs[idx])
-        y = xform(targets[idx])
-        yield x, y
+        yield tuple(xform(array[idx]) for array in arrays)
 
-def train(net, inputs, targets, num_epochs=50, batch_size=64, learning_rate=0.001, l1_grads=0, n_grads=1,
-        mask_grads=False, grad_radius=6, device=None):
+def train(net, inputs, targets, num_epochs=50, batch_size=64, learning_rate=0.001, device=None):
     if device is None:
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        net.to(device)
     optimizer = optim.Adam(net.parameters(), lr=learning_rate)
     scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[int(num_epochs/2), int(num_epochs*3/4), int(num_epochs*7/8)], gamma=0.1)
     criterion = nn.MSELoss()
@@ -34,42 +32,13 @@ def train(net, inputs, targets, num_epochs=50, batch_size=64, learning_rate=0.00
         epoch_steps = 0
         for x, y in minibatch(inputs, targets, batch_size=batch_size):
             optimizer.zero_grad()
-
-            if l1_grads > 0:
-                x = x.requires_grad_()
-
             yhat = net.forward(x.to(device))
-
             ytrue = y.to(device)
-
-            mse_loss = criterion(yhat, ytrue)
-            grad_loss = 0
-
-            if l1_grads > 0:
-                for _ in range(n_grads):
-                    i = np.random.choice(yhat.shape[1])
-                    j = np.random.choice(yhat.shape[2])
-                    k = np.random.choice(yhat.shape[3])
-                    dyhat_dxs = torch.autograd.grad(yhat[:,i,j,k].sum(), x, create_graph=True)[0]
-                    if mask_grads:
-                        mask = np.array([[
-                            int(np.abs(j-j2) > grad_radius) *
-                            int(np.abs(k-k2) > grad_radius)
-                            for j2 in range(yhat.shape[2])]
-                            for k2 in range(yhat.shape[3])])
-                        mask = mask[np.newaxis, np.newaxis, :, :]
-                        mask = torch.tensor(mask)
-                        grad_loss += l1_grads * (dyhat_dxs * mask).abs().sum()
-                    else:
-                        grad_loss += l1_grads * dyhat_dxs.abs().sum()
-
-            loss = mse_loss + grad_loss
+            loss = criterion(yhat, ytrue)
             loss.backward()
             optimizer.step()
             epoch_loss += loss.item()
             epoch_steps += 1
-            if (epoch_steps - 1) % 100 == 0:
-                print(f"Loss after Epoch {epoch} step {epoch_steps-1}: {epoch_loss/epoch_steps}")
         print(f"Loss after Epoch {epoch+1}: {epoch_loss/epoch_steps}")
         scheduler.step()
 
@@ -115,7 +84,9 @@ class ScaledModel(object):
         ]).astype(np.float32)
 
     def extract_vars(self, m, features):
-        if isinstance(m, pyqg.Model):
+        if isinstance(m, np.ndarray):
+            x = m
+        elif isinstance(m, pyqg.Model):
             x = self.extract_vars_from_qgmodel(m, features)
         else:
             assert isinstance(m, xr.Dataset)
@@ -132,30 +103,22 @@ class ScaledModel(object):
         return self.extract_vars(m, self.targets)
 
     def predict(self, inputs, device=None):
-        if isinstance(inputs, np.ndarray):
-            x = inputs
-        else:
-            x = self.extract_inputs(inputs)
-        scaled = self.input_scale.transform(x)
-        tensor = torch.as_tensor(scaled)
-        if device is not None:
-            tensor = tensor.to(device)
-        with torch.no_grad():
-            output = self.forward(tensor).cpu().numpy()
-        res = self.output_scale.inverse_transform(output)
+        preds = []
+        for x, in minibatch(self.input_scale.transform(self.extract_inputs(inputs))):
+            if device is not None:
+                x = x.to(device)
+            with torch.no_grad():
+                preds.append(self.forward(x).cpu().numpy())
+        preds = self.output_scale.inverse_transform(np.vstack(preds))
         if isinstance(inputs, pyqg.Model):
-            return res.astype(inputs.q.dtype)
+            return preds.astype(inputs.q.dtype)
         else:
-            return res
+            return preds
 
-    def mse(self, inputs, targets, device=None):
-        mse = nn.MSELoss()
-        mses = []
-        for x, y in minibatch(inputs, targets, as_tensor=False):
-            yhat = self.predict(x)
-            errs = np.sum((y-yhat)**2, axis=1)
-            mses.append(errs.mean())
-        return np.mean(mses)
+    def mse(self, inputs, targets, **kw):
+        y_true = targets.reshape(-1, np.prod(targets.shape[1:]))
+        y_pred = self.predict(inputs).reshape(-1, np.prod(targets.shape[1:]))
+        return np.mean(np.sum((y_pred - y_true)**2, axis=1))
 
     def fit(self, inputs, targets, rescale=False, **kw):
         if rescale or not hasattr(self, 'input_scale') or self.input_scale is None:
