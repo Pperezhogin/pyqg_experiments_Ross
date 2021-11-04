@@ -1,8 +1,14 @@
 .ipynb_checkpoints/
-__pycache__/
 slurm*.out
 *.sw[a-z]
 Untitled*.ipynb
 foo/
 bar/
 baz/
+pyqg_subgrid_experiments/tests/tmp
+*.egg-info
+**/__pycache__
+**/.pytest_cache
+*.pyc
+dist
+pip-wheel-metadata
