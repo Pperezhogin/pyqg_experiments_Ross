@@ -4,48 +4,117 @@ import xarray as xr
 from scipy.stats import pearsonr
 from scipy.stats import linregress
 from pyqg.diagnostic_tools import calc_ispec
+import numpy.fft as npfft
+import os
 
-def time_until_uncorrelated(m1, m2, filter=None, thresh=0.5, perturbation_sd=1e-10, max_timesteps=100000):
-    scale = m1.nx // m2.nx
-
-    if scale > 1 and filter is None:
-        import gcm_filters
-        filter = gcm_filters.Filter(filter_scale=scale, dx_min=1, grid_type=gcm_filters.GridType.REGULAR)
-
-    def possibly_downscaled_q(m):
-        if scale == 1:
-            return m1.q
+class Dataset(object):
+    def __init__(self, ds):
+        if isinstance(ds, xr.Dataset):
+            self.ds = ds
+            self.m = pyqg_model_for(ds)
+        elif isinstance(ds, pyqg.QGModel):
+            self.ds = ds.to_dataset().isel(time=-1)
+            self.m = ds
+        elif isinstance(ds, str):
+            # TODO: support remote paths
+            self.ds = xr.load_mfdataset(ds, combine="nested", concat_dim="run")
+            self.m = pyqg_model_for(self.ds)
         else:
-            ds = m.to_dataset().isel(time=-1)
-            downscaled = filter.apply(ds, dims=['y','x']).coarsen(x=scale, y=scale).mean()
-            return downscaled.q.data
+            raise ValueError("must pass xr.Dataset, pyqg.QGModel, or glob path")
+    
+    def __repr__(self):
+        return f"wrapper around\n{self.ds}"
         
-    def correlation(qa, qb):
-        return pearsonr(qa.ravel(), qb.ravel())[0]
+    def __getattr__(self, q):
+        if q in ['m','ds']:
+            return super().__getattr__(q)
+        return self.ds[q]
+
+    def __getitem__(self, q):
+        if isinstance(q, str):
+            return self.ds[q]
+        elif isinstance(q, xr.DataArray) or isinstance(q, np.ndarray):
+            # slight hack to enable e.g. `advected('q')` and
+            # `advected(q_array)` to both work
+            return q
+        else:
+            raise KeyError(q)
     
-    for _ in range(3):
-        m2.set_q1q2(*possibly_downscaled_q(m1))
-        m1._step_forward()
-        m2._step_forward()
-        
-    initial_conditions = possibly_downscaled_q(m1)
-    perturbed_conditions = initial_conditions + np.random.normal(size=initial_conditions.shape) * perturbation_sd
+    def __setitem__(self, key, val):
+        self.ds[key] = val
+
+    def isel(self, *args, **kwargs):
+        return self.__class__(self.ds.isel(*args, **kwargs))
     
-    assert correlation(initial_conditions, perturbed_conditions) > 0.9
+    @property
+    def spec_0(self):
+        return self['qh'] * 0
+
+    @property
+    def real_0(self):
+        return self['q'] * 0
+
+    def spec_var(self, arr):
+        return self.spec_0 + arr
+
+    def real_var(self, arr):
+        return self.real_0 + arr
+
+    def fft(self, x):
+        return self.spec_var(npfft.rfftn(self[x], axes=(-2,-1)))
     
-    m2.set_q1q2(*perturbed_conditions)
+    def ifft(self, xh):
+        return self.real_var(npfft.irfftn(self[xh], axes=(-2,-1)))
     
-    steps = 0
+    def ddx(self, q):
+        return self.ifft(self.fft(self[q]) * 1j * self.k)
     
-    while steps < max_timesteps:
-        m1._step_forward()
-        m2._step_forward() 
-        steps += 1
-        corr = correlation(m2.q, possibly_downscaled_q(m1))
-        if corr <= thresh:
-            break
+    def ddy(self, q):
+        return self.ifft(self.fft(self[q]) * 1j * self.l)
     
-    return steps
+    def advected(self, q):
+        return self.ddx(self[q] * self.ufull) + self.ddy(self[q] * self.vfull)
+
+    def train_test_split(self, test_frac=0.25):
+        raise NotImplementedError
+
+    @property
+    def ke(self):
+        return 0.5 * (self.ufull**2 + self.vfull**2)
+
+    @property
+    def vorticity(self):
+        return self.ddx('vfull') - self.ddx('ufull')
+
+    @property
+    def enstrophy(self):
+        return self.vorticity**2
+
+    @property
+    def relative_vorticity(self):
+        return self.ddx('v') - self.ddx('u')
+
+    @property
+    def shearing_deformation(self):
+        return self.ddx('u') - self.ddy('v')
+
+    @property
+    def stretching_deformation(self):
+        return self.ddx('v') + self.ddy('u')
+
+    @property
+    def zb2020_parameterization(self):
+        # Eq. 6 of https://laurezanna.github.io/files/Zanna-Bolton-2020.pdf
+        vort_shear = self.relative_vorticity * self.shearing_deformation
+        vort_stretch = self.relative_vorticity * self.stretching_deformation
+        sum_sq = (self.relative_vorticity**2
+                + self.shearing_deformation**2
+                + self.stretching_deformation**2) / 2.0
+
+        du = self.ddx(sum_sq-vort_shear) + self.ddy(vort_stretch)
+        dv = self.ddy(sum_sq+vort_shear) + self.ddx(vort_stretch)
+
+        return du, dv
 
 def pyqg_kwargs_for(run):
     import inspect
@@ -116,11 +185,6 @@ def spectral_difference(k, spec1, spec2, kmax=1.5e-4):
 
 def compare_simulation_datasets(ds1, ds2):
     datasets = [ds1, ds2]
-
-    for i, ds in enumerate(datasets):
-        ds['ke'] = ds.ufull**2 + ds.vfull**2
-        ds['vorticity'] = (-ds.ufull.differentiate(coord='y') + ds.vfull.differentiate(coord='x'))
-        ds['enstrophy'] = ds['vorticity']**2
 
     comparisons = defaultdict(dict)
 
