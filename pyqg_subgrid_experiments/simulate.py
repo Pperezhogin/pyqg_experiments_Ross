@@ -353,6 +353,7 @@ if __name__ == '__main__':
     parser.add_argument('--ag7531', type=int, default=0)
     parser.add_argument('--control', type=int, default=0)
     parser.add_argument('--transfer_test', type=int, default=0)
+    parser.add_argument('--drop_complex', type=int, default=1)
     args, extra = parser.parse_known_args()
 
     # Setup parameters for dataset generation functions
@@ -374,4 +375,12 @@ if __name__ == '__main__':
     else:
         ds = generate_forcing_dataset(**kwargs)
 
-    ds.to_netcdf(args.save_to, engine="h5netcdf", invalid_netcdf=True)
+    if args.drop_complex:
+        # Remove complex variables since they're technically redundant and
+        # standard NetCDF files won't support them
+        complex_vars = [k for k,v in ds.variables.items() if np.iscomplexobj(v)]
+        ds = ds.drop(complex_vars)
+        ds.to_netcdf(args.save_to)
+    else:
+        # Keep complex variables, but save using a different engine
+        ds.to_netcdf(args.save_to, engine="h5netcdf", invalid_netcdf=True)
