@@ -29,7 +29,7 @@ class Dataset(object):
             self.m = ds
         elif isinstance(ds, str):
             # Load an xarray dataset from a glob path
-            self.ds = xr.load_mfdataset(ds, combine="nested", concat_dim="run")
+            self.ds = xr.open_mfdataset(ds, combine="nested", concat_dim="run")
             self.m = pyqg_model_for(self.ds)
         else:
             raise ValueError("must pass xr.Dataset, pyqg.QGModel, or glob path")
@@ -148,15 +148,15 @@ class Dataset(object):
 
     @cachedproperty
     def relative_vorticity(self):
-        return self.ddx('v') - self.ddx('u')
+        return self.ddx('v') - self.ddy('u')
 
     @cachedproperty
     def shearing_deformation(self):
-        return self.ddx('u') - self.ddy('v')
+        return self.ddx('v') + self.ddy('u')
 
     @cachedproperty
     def stretching_deformation(self):
-        return self.ddx('v') + self.ddy('u')
+        return self.ddx('u') - self.ddy('v')
 
     @cachedproperty
     def zb2020_parameterization(self):
@@ -178,13 +178,24 @@ class Dataset(object):
     #
     ###########################################
 
-    def isotropic_spectrum(self, key, z=None, agg=np.mean):
+    def isotropic_spectrum(self, key, z=None, agg=np.mean, time_avg=True):
         if key == 'Dissipation':
             assert z is None
             m = self.m
-            k, lower_ke = self.isotropic_spectrum('KEspec', z=1, agg=agg)
+            k, lower_ke = self.isotropic_spectrum('KEspec', z=-1, agg=agg, time_avg=time_avg)
             return k, -m.rek * m.del2 * m.M**2 * lower_ke
-        elif key not in self.ds:
+        elif key in self.ds and time_avg:
+            spec = self[key]
+        elif key in self.m.diagnostics:
+            assert 'run' not in self.dims
+            assert np.allclose(self.m.q, self.ds.isel(time=-1).q.data)
+            diag = self.m.diagnostics[key]
+            dims = diag['dims']
+            spec = diag['function'](self.m)
+            coords = {}
+            for d in dims: coords[d] = self.ds.coords[d]
+            spec = xr.DataArray(spec, dims=dims, coords=coords)
+        else:
             k, dummy = self.isotropic_spectrum('KEflux')
             return k, np.zeros_like(dummy)
 
@@ -192,8 +203,6 @@ class Dataset(object):
             spec = self[key].sum(dim='lev')
         elif z is not None:
             spec = self[key].isel(lev=z)
-        else:
-            spec = self[key]
 
         if 'run' in self.dims:
             spectra = []

@@ -2,7 +2,7 @@ import os
 import glob
 import numpy as np
 from pyqg_subgrid_experiments.models import FullyCNN
-from pyqg_subgrid_experiments.simulation import initialize_pyqg_model
+from pyqg_subgrid_experiments.simulate import initialize_pyqg_model
 
 class Parameterization(object):
     def __call__(self, m):
