@@ -120,6 +120,11 @@ class CNNParameterization(object):
         # Return the trained parameterization
         return cls(directory, models=models)
 
+    def run_online(self, **kw):
+        params = dict(kw)
+        params[self.parameterization_type] = self
+        return generate_dataset(**params)
+
     def test_offline(self, dataset):
         test = dataset[self.targets]
         for key, val in self.predict(dataset).items():
@@ -168,10 +173,3 @@ class CNNParameterization(object):
             ) / len(self.targets)
 
         return test
-
-    def run_online(self, **kw):
-        params = dict(kw)
-        params[self.parameterization_type] = self
-        return generate_dataset(**params)
-
-

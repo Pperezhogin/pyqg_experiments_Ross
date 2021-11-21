@@ -92,10 +92,31 @@ def test_saving_and_loading():
         dataset.isel(lev=1).q_forcing_advection.data.reshape(-1, 1, 64, 64)
     )
 
+def test_running():
+    dataset = load_dataset()
+
+    pdir = os.path.join(dirname, 'tmp')
+    os.system(f"rm -rf {pdir}")
+    param = pse.CNNParameterization.train_on(
+            dataset,
+            pdir,
+            inputs=['q'],
+            targets=['q_forcing_advection'],
+            num_epochs=0)
+
     offline = param.test_offline(dataset)
 
     # This is a random prediction, so it should have low correlation
     assert np.abs(offline.correlation.mean()) < 0.05
+
+    pyqg_kwargs = dataset.pyqg_params
+    pyqg_kwargs['tmax'] = pyqg_kwargs['dt'] * 1
+    pyqg_kwargs['log_level'] = 0
+
+    online = param.run_online(sampling_freq=1, **pyqg_kwargs)
+
+    # Assert it ran successfully (for only one step)
+    assert online.time.shape == (1,)
 
 def test_target_variants():
     dataset = load_dataset()
