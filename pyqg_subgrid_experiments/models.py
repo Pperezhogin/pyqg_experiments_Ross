@@ -9,6 +9,7 @@ import pyqg
 import xarray as xr
 from collections import OrderedDict
 from sklearn.isotonic import IsotonicRegression
+import pyqg_subgrid_experiments as pse
 
 def minibatch(*arrays, batch_size=64, as_tensor=True):
     assert len(set([len(a) for a in arrays])) == 1
@@ -60,41 +61,23 @@ class ScaledModel(object):
     def set_targets(self, targets):
         self.targets = targets
 
-    def extract_vars_from_qgmodel(self, m, features):
-        cache = {}
+    def extract_vars(self, m, features, spatially_flatten=False, dtype=np.float32):
+        if not isinstance(m, pse.Dataset):
+            m = pse.Dataset(m)
 
-        for inp, z in features:
-            if 'dqdt' in inp:
-                val = getattr(m,inp.replace('dq','dqh'))
-                cache[inp] = npfft.irfftn(val,axes=(-2,-1))
-            else:
-                cache[inp] = getattr(m,inp)
+        arr = np.array([
+            m.extract_feature(feat).isel(lev=z).data
+            for feat, z in features
+        ])
 
-        return np.array([[
-            cache[inp][z] for inp, z in self.inputs
-        ]]).astype(np.float32)
+        arr = np.moveaxis(arr, 0, -3)
 
-    def extract_vars_from_netcdf(self, ds, features):
-        return np.vstack([
-            np.swapaxes(np.array([
-                ds.isel(run=i, lev=z)[inp].data
-                for inp, z in features
-            ]),0,1)
-            for i in range(len(ds.run))
-        ]).astype(np.float32)
+        arr = arr.reshape(-1, len(features), m.nx, m.nx)
 
-    def extract_vars(self, m, features):
-        if isinstance(m, np.ndarray):
-            x = m
-        elif isinstance(m, pyqg.Model):
-            x = self.extract_vars_from_qgmodel(m, features)
-        else:
-            assert isinstance(m, xr.Dataset)
-            if 'run' in m.dims:
-                x = self.extract_vars_from_netcdf(m, features)
-            else:
-                x = self.extract_vars_from_netcdf(m.expand_dims('run'), features)
-        return x
+        if spatially_flatten:
+            arr = arr.reshape(-1, len(features), m.nx**2)
+
+        return arr.astype(dtype)
 
     def extract_inputs(self, m):
         return self.extract_vars(m, self.inputs)

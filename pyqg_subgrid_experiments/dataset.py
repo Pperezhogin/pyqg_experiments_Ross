@@ -3,6 +3,7 @@ import numpy as np
 import numpy.fft as npfft
 import xarray as xr
 import inspect
+import re
 from pyqg.diagnostic_tools import calc_ispec
 from collections import OrderedDict, defaultdict
 from scipy.stats import pearsonr, linregress, wasserstein_distance
@@ -33,6 +34,10 @@ class Dataset(object):
             self.m = pyqg_model_for(self.ds)
         else:
             raise ValueError("must pass xr.Dataset, pyqg.QGModel, or glob path")
+
+    @property
+    def pyqg_params(self):
+        return pyqg_kwargs_for(self.ds)
 
     ###########################################
     #
@@ -76,6 +81,37 @@ class Dataset(object):
         order = np.arange(N)
         np.random.shuffle(order)
         return self.isel(run=order[:cutoff]), self.isel(run=order[cutoff:])
+
+    def extract_feature(self, feature):
+        def split_by(s): 
+            parts = feature.split(s)
+            part1 = parts[0]
+            part2 = s.join(parts[1:])
+            return self.extract_feature(part1), self.extract_feature(part2)
+
+        if feature not in self.ds:
+            if '_times_' in feature:
+                part1, part2 = split_by('_times_')
+                self.ds[feature] = part1 * part2
+            elif '_plus_' in feature:
+                part1, part2 = split_by('_plus_')
+                self.ds[feature] = part1 + part2
+            elif '_minus_' in feature:
+                part1, part2 = split_by('_minus_')
+                self.ds[feature] = part1 - part2
+            elif feature.startswith('ddx_'):
+                self.ds[feature] = self.ddx(self.extract_feature(feature[4:]))
+            elif feature.startswith('ddy_'):
+                self.ds[feature] = self.ddy(self.extract_feature(feature[4:]))
+            elif feature == 'dqdt_through_lores':
+                if 'dqdt' in self.ds:
+                    self.ds[feature] = self.ds['dqdt']
+                else:
+                    self.ds[feature] = self.real_var(self.m.ifft(self.m.dqhdt))
+            else:
+                raise ValueError(f"could not interpret {feature}")
+
+        return self.ds[feature]
 
     ###########################################
     #
@@ -130,6 +166,10 @@ class Dataset(object):
     # Helpers for computing physical quantities
     #
     ###########################################
+
+    @property
+    def nx(self):
+        return self.m.nx
     
     def advected(self, q):
         return self.ddx(self[q] * self.ufull) + self.ddy(self[q] * self.vfull)

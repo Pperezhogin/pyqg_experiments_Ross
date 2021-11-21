@@ -2,25 +2,15 @@ import os
 import glob
 import numpy as np
 from pyqg_subgrid_experiments.models import FullyCNN
-from pyqg_subgrid_experiments.simulate import initialize_pyqg_model
-
-class Parameterization(object):
-    def __call__(self, m):
-        pass
-
-    def initialize_pyqg_model(self, **params):
-        pass
+from pyqg_subgrid_experiments.simulate import generate_dataset
 
 class CNNParameterization(object):
     def __init__(self, directory, models=None, model_class=FullyCNN):
         self.directory = directory
         self.models = models if models is not None else [
             model_class.load(f)
-            for f in glob.glob(os.path.join(directory, "models/*"))
+            for f in glob.glob(os.path.join(directory, "models/*.pt"))
         ]
-
-    def initialize_pyqg_model(self, **params):
-        pass
 
     def predict(self, m):
         preds = []
@@ -46,6 +36,7 @@ class CNNParameterization(object):
             layerwise_inputs=None,
             layerwise_targets=None,
             num_epochs=50,
+            zero_mean=True,
             model_class=FullyCNN, **kw):
 
         layers = range(len(dataset.lev))
@@ -58,7 +49,7 @@ class CNNParameterization(object):
                 model_class(
                     [(feat, z) for feat in inputs],
                     [(feat, z) for feat in targets],
-                    zero_mean=True
+                    zero_mean=zero_mean
                 ) for z in layers
             ]
         elif layerwise_targets:
@@ -68,7 +59,8 @@ class CNNParameterization(object):
                 model_class(
                     [(feat, zi) for feat in inputs for zi in layers],
                     [(feat, z) for feat in targets],
-                    zero_mean=True
+                    zero_mean=zero_mean
+
                 ) for z in layers
             ]
         else:
@@ -78,7 +70,7 @@ class CNNParameterization(object):
                 model_class(
                     [(feat, z) for feat in inputs for z in layers],
                     [(feat, z) for feat in targets for z in layers],
-                    zero_mean=True
+                    zero_mean=zero_mean
                 )
             ]
 
@@ -87,15 +79,19 @@ class CNNParameterization(object):
             X = model.extract_inputs(dataset)
             Y = model.extract_targets(dataset)
             model.fit(X, Y, num_epochs=num_epochs, **kw)
-            model.save(os.path.join(directory, f"models/{z}"))
+            model.save(os.path.join(directory, f"models/{z}.pt"))
 
         # Return the trained parameterization
         return cls(directory, models=models)
 
-    def test_on(self, dataset):
+    def test_offline(self, dataset):
         preds = self.predict(dataset)
 
         import pdb; pdb.set_trace()
 
+    def run_online(self, **kw):
+        params = dict(kw)
+        params[self.parameterization_type] = self
+        return generate_dataset(**params)
 
 
