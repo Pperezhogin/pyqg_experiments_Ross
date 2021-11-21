@@ -57,6 +57,8 @@ class Dataset(object):
                     return object.__getattribute__(self, q)
                 except AttributeError:
                     return self.ds[q]
+        elif isinstance(q, list) and isinstance(q[0], str):
+            return self.ds[q]
         elif isinstance(q, xr.DataArray) or isinstance(q, np.ndarray):
             # slight hack to enable e.g. `advected('q')` and
             # `advected(q_array)` to both work

@@ -92,6 +92,11 @@ def test_saving_and_loading():
         dataset.isel(lev=1).q_forcing_advection.data.reshape(-1, 1, 64, 64)
     )
 
+    offline = param.test_offline(dataset)
+
+    # This is a random prediction, so it should have low correlation
+    assert np.abs(offline.correlation.mean()) < 0.05
+
 def test_target_variants():
     dataset = load_dataset()
 
@@ -113,7 +118,7 @@ def test_target_variants():
     assert param_uv_q.models[1].inputs == [('u', 1), ('v', 1)]
     assert param_uv_q.models[0].targets == [('q_forcing_advection', 0)]
     assert param_uv_q.models[1].targets == [('q_forcing_advection', 1)]
-    assert param_uv_q.predict(dataset).shape == dataset.q.shape
+    assert param_uv_q(dataset).shape == dataset.q.shape
     assert param_uv_q.parameterization_type == 'q_parameterization'
 
     param_uv2_q = setup_model(
@@ -128,7 +133,7 @@ def test_target_variants():
     assert param_uv2_q.models[1].inputs == [('u', 0), ('u', 1), ('v', 0), ('v', 1)]
     assert param_uv2_q.models[0].targets == [('q_forcing_advection', 0)]
     assert param_uv2_q.models[1].targets == [('q_forcing_advection', 1)]
-    assert param_uv2_q.predict(dataset).shape == dataset.q.shape
+    assert param_uv2_q(dataset).shape == dataset.q.shape
 
     param_uv2_q2 = setup_model(
             inputs=['u','v'],
@@ -140,7 +145,7 @@ def test_target_variants():
     assert param_uv2_q2.targets == ['q_forcing_advection']
     assert param_uv2_q2.models[0].inputs == [('u', 0), ('u', 1), ('v', 0), ('v', 1)]
     assert param_uv2_q2.models[0].targets == [('q_forcing_advection', 0), ('q_forcing_advection', 1)]
-    assert param_uv2_q2.predict(dataset).shape == dataset.q.shape
+    assert param_uv2_q2(dataset).shape == dataset.q.shape
 
     param_uv_uv = setup_model(
             inputs=['u','v'],
@@ -154,7 +159,7 @@ def test_target_variants():
     assert param_uv_uv.models[1].inputs == [('u', 1), ('v', 1)]
     assert param_uv_uv.models[0].targets == [('u_forcing_advection', 0), ('v_forcing_advection', 0)]
     assert param_uv_uv.models[1].targets == [('u_forcing_advection', 1), ('v_forcing_advection', 1)]
-    du, dv = param_uv_uv.predict(dataset)
+    du, dv = param_uv_uv(dataset)
     assert du.shape == dataset.u.shape
     assert dv.shape == dataset.v.shape
     assert param_uv_uv.parameterization_type == 'uv_parameterization'
@@ -170,7 +175,7 @@ def test_target_variants():
     assert param_uv2_uv2.models[0].inputs == [('u', 0), ('u', 1), ('v', 0), ('v', 1)]
     assert param_uv2_uv2.models[0].targets == [('u_forcing_advection', 0), ('u_forcing_advection', 1),
                                                ('v_forcing_advection', 0), ('v_forcing_advection', 1)]
-    du, dv = param_uv2_uv2.predict(dataset)
+    du, dv = param_uv2_uv2(dataset)
     assert du.shape == dataset.u.shape
     assert dv.shape == dataset.v.shape
 
@@ -179,7 +184,7 @@ def test_target_variants():
             targets=['uu_subgrid_flux', 'uv_subgrid_flux', 'vv_subgrid_flux'],
             layerwise_inputs=False,
             layerwise_targets=False)
-    du, dv = param_uv_flux.predict(dataset)
+    du, dv = param_uv_flux(dataset)
     assert du.shape == dataset.u.shape
     assert dv.shape == dataset.v.shape
 

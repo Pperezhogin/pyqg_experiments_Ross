@@ -46,9 +46,12 @@ class CNNParameterization(object):
                 m_shape[-3] = 1
                 preds[target][m_indices] = pred[:,channel,:,:].reshape(m_shape)
 
+        return preds
+
+    def __call__(self, m):
+        preds = self.predict(m)
         keys = list(sorted(preds.keys()))
         assert keys == self.targets
-
         if len(keys) == 1:
             return preds[keys[0]]
         elif keys == ['u_forcing_advection', 'v_forcing_advection']:
@@ -62,10 +65,6 @@ class CNNParameterization(object):
                     ds.ddx(preds['uv_subgrid_flux']) + ds.ddy(preds['vv_subgrid_flux']))
         else:
             raise ValueError(f"unknown targetset {keys}")
-
-
-    def __call__(self, m):
-        return self.predict(m)
 
     @classmethod
     def train_on(cls, dataset, directory,
@@ -123,11 +122,53 @@ class CNNParameterization(object):
         return cls(directory, models=models)
 
     def test_offline(self, dataset):
-        preds = self.predict(dataset)
+        test = dataset[self.targets]
+        for key, val in self.predict(dataset).items():
+            truth = test[key]
+            test[f"{key}_predictions"] = truth*0 + val
+            preds = test[f"{key}_predictions"]
+            error = (truth - preds)**2
 
-        results = dataset[self.targets]
+            true_centered = (truth - truth.mean())
+            pred_centered = (preds - preds.mean())
+            true_var = true_centered**2
+            pred_var = pred_centered**2
+            true_pred_cov = true_centered * pred_centered
 
-        import pdb; pdb.set_trace()
+            def dims_except(*dims):
+                return [d for d in test[key].dims if d not in dims]
+            
+            time = dims_except('x','y','lev')
+            space = dims_except('time','lev')
+            both = dims_except('lev')
+
+            test[f"{key}_spatial_mse"] = error.mean(dim=time)
+            test[f"{key}_temporal_mse"] = error.mean(dim=space)
+            test[f"{key}_mse"] = error.mean(dim=both)
+
+            test[f"{key}_spatial_skill"] = 1 - test[f"{key}_spatial_mse"] / true_var.mean(dim=time)
+            test[f"{key}_temporal_skill"] = 1 - test[f"{key}_temporal_mse"] / true_var.mean(dim=space)
+            test[f"{key}_skill"] = 1 - test[f"{key}_mse"] / true_var.mean(dim=both)
+
+            test[f"{key}_spatial_correlation"] = (
+                true_pred_cov.sum(dim=time)
+                / (true_var.sum(dim=time) * pred_var.sum(dim=time))**0.5
+            )
+            test[f"{key}_temporal_correlation"] = (
+                true_pred_cov.sum(dim=space)
+                / (true_var.sum(dim=space) * pred_var.sum(dim=space))**0.5
+            )
+            test[f"{key}_correlation"] = (
+                true_pred_cov.sum(dim=both)
+                / (true_var.sum(dim=both) * pred_var.sum(dim=both))**0.5
+            )
+
+        for metric in ['correlation', 'mse', 'skill']:
+            test[metric] = sum(
+                test[f"{key}_{metric}"] for key in self.targets
+            ) / len(self.targets)
+
+        return test
 
     def run_online(self, **kw):
         params = dict(kw)
