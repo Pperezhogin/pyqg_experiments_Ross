@@ -19,6 +19,13 @@ class cachedproperty(object):
     return value
 
 class Dataset(object):
+    @classmethod
+    def wrap(kls, ds):
+        if isinstance(ds, kls):
+            return ds
+        else:
+            return kls(ds)
+
     def __init__(self, ds):
         if isinstance(ds, xr.Dataset):
             # Wrap an xarray dataset

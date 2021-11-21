@@ -118,6 +118,13 @@ def test_running():
     # Assert it ran successfully (for only one step)
     assert online.time.shape == (1,)
 
+def test_zb2020_parameterization():
+    dataset = load_dataset()
+    param = pse.ZB2020Parameterization()
+    offline = param.test_offline(dataset)
+    assert offline.correlation.mean() > 0.9
+    assert offline.skill.mean() > 0.9
+
 def test_target_variants():
     dataset = load_dataset()
 
@@ -208,4 +215,3 @@ def test_target_variants():
     du, dv = param_uv_flux(dataset)
     assert du.shape == dataset.u.shape
     assert dv.shape == dataset.v.shape
-
