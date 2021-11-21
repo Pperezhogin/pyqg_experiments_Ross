@@ -1,7 +1,6 @@
 import os
 import glob
 import numpy as np
-
 import pyqg_subgrid_experiments as pse
 from pyqg_subgrid_experiments.models import FullyCNN
 from pyqg_subgrid_experiments.simulate import generate_dataset
@@ -11,7 +10,7 @@ class CNNParameterization(object):
         self.directory = directory
         self.models = models if models is not None else [
             model_class.load(f)
-            for f in glob.glob(os.path.join(directory, "models/*.pt"))
+            for f in glob.glob(os.path.join(directory, "models/*"))
         ]
 
     @property
@@ -116,7 +115,7 @@ class CNNParameterization(object):
             X = model.extract_inputs(dataset)
             Y = model.extract_targets(dataset)
             model.fit(X, Y, num_epochs=num_epochs, **kw)
-            model.save(os.path.join(directory, f"models/{z}.pt"))
+            model.save(os.path.join(directory, f"models/{z}"))
 
         # Return the trained parameterization
         return cls(directory, models=models)
