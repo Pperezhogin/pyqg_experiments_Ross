@@ -1,6 +1,8 @@
 import os
 import glob
 import numpy as np
+
+import pyqg_subgrid_experiments as pse
 from pyqg_subgrid_experiments.models import FullyCNN
 from pyqg_subgrid_experiments.simulate import generate_dataset
 
@@ -12,19 +14,55 @@ class CNNParameterization(object):
             for f in glob.glob(os.path.join(directory, "models/*.pt"))
         ]
 
+    @property
+    def targets(self):
+        targets = set()
+        for model in self.models:
+            for target, z in model.targets:
+                targets.add(target)
+        return list(sorted(list(targets)))
+
+    @property
+    def parameterization_type(self):
+        if any(q in self.targets[0] for q in ['q_forcing', 'q_subgrid']):
+            return 'q_parameterization'
+        else:
+            return 'uv_parameterization'
+
     def predict(self, m):
-        preds = []
+        preds = {}
+
         for model in self.models:
             pred = model.predict(m)
             assert len(pred.shape) == 4
             assert len(model.targets) == pred.shape[1]
             for channel in range(pred.shape[1]):
-                z = model.targets[channel][1]
-                assert z == len(preds)
-                preds.append(pred[:,channel,:,:])
-        preds = np.swapaxes(np.array(preds), 0, 1)
-        if len(preds) == 1: preds = preds[0]
-        return preds
+                target, z = model.targets[channel]
+                if target not in preds:
+                    preds[target] = np.zeros_like(m.q)
+                m_indices = [slice(None) for _ in m.q.shape]
+                m_indices[-3] = slice(z,z+1)
+                m_shape = [s for s in m.q.shape]
+                m_shape[-3] = 1
+                preds[target][m_indices] = pred[:,channel,:,:].reshape(m_shape)
+
+        keys = list(sorted(preds.keys()))
+        assert keys == self.targets
+
+        if len(keys) == 1:
+            return preds[keys[0]]
+        elif keys == ['u_forcing_advection', 'v_forcing_advection']:
+            return tuple(preds[k] for k in keys)
+        elif keys == ['uq_subgrid_flux', 'vq_subgrid_flux']:
+            ds = m if isinstance(m, pse.Dataset) else pse.Dataset(m)
+            return ds.ddx(preds['uq_subgrid_flux']) + ds.ddy(preds['vq_subgrid_flux'])
+        elif 'uu_subgrid_flux' in keys and len(keys) == 3:
+            ds = m if isinstance(m, pse.Dataset) else pse.Dataset(m)
+            return (ds.ddx(preds['uu_subgrid_flux']) + ds.ddy(preds['uv_subgrid_flux']),
+                    ds.ddx(preds['uv_subgrid_flux']) + ds.ddy(preds['vv_subgrid_flux']))
+        else:
+            raise ValueError(f"unknown targetset {keys}")
+
 
     def __call__(self, m):
         return self.predict(m)
@@ -86,6 +124,8 @@ class CNNParameterization(object):
 
     def test_offline(self, dataset):
         preds = self.predict(dataset)
+
+        results = dataset[self.targets]
 
         import pdb; pdb.set_trace()
 
