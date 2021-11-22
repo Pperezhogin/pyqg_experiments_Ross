@@ -48,12 +48,8 @@ for inp in inputs:
                     zero_mean=zero_mean,
                     layerwise_inputs=layer_in,
                     layerwise_targets=layer_out,
-                    num_epochs=3
-
                 )
 
-for restart in range(3):
+for restart in range(1):
     for name, kw in argsets.items():
         launch_job(save_dir=f"{model_dir}/{name}/{restart}", **kw)
-
-        raise 'STOP'

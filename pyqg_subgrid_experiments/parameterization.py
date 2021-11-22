@@ -45,7 +45,7 @@ class Parameterization(object):
         else:
             raise ValueError(f"unknown targetset {keys}")
 
-    def test_on(self, dataset, artifact_dir=None, n_simulations=25, **kw):
+    def test_on(self, dataset, artifact_dir=None, n_simulations=5, **kw):
         if artifact_dir is not None:
             offline_path = os.path.join(artifact_dir, "offline_metrics.nc")
             online_dir = os.path.join(artifact_dir, "online_simulations")
