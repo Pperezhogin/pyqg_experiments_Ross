@@ -226,6 +226,86 @@ class AnimatedImage(AnimatedPlot):
         self.im.set_clim(self.vmin, self.vmax)
         return [self.im]
 
+class AnimatedSimulationGroup(object):
+    def ds(self, i):
+        return self.datasets[i]
+
+    def q(self, i, z):
+        return self.ds(i).isel(lev=z).q.data
+
+    def ke(self, i):
+        return self.ds(i).ke.sum(dim='lev').data
+
+    def en(self, i):
+        return self.ds(i).enstrophy.sum(dim='lev').data
+
+    def kespec(self, i):
+        m = self.models[i]
+        try:
+            return calc_ispec(m, m.get_diagnostic('KEspec').sum(axis=0))
+        except:
+            return calc_ispec(m, m.diagnostics['KEspec']['function'](m).sum(axis=0))
+
+    def __init__(self, models, labels, steps_per_frame=100, title=None):
+        fig = plt.figure(figsize=(16.75,3.25*len(models)))
+
+        if title is not None:
+            fig.suptitle(title, fontsize=20)
+
+        gs = fig.add_gridspec(len(models)*2, 2+2+2+3)
+
+        self.fig = fig
+        self.gs = gs
+        self.steps_per_frame = steps_per_frame
+
+        def titleize(sp, title):
+            ax = fig.add_subplot(sp)
+            ax.set_title(title, fontsize=16)
+            return ax
+
+        axes = dict(spect=titleize(gs[:,6:], "Kinetic energy spectra"))
+
+        self.models = models
+        self.labels = labels
+        self.datasets = [pse.Dataset(m) for m in models]
+
+        anims = []
+
+        for i in range(len(models)):
+            axes[f"pv{i}"] = titleize(gs[i*2:(i+1)*2,0:2], ("" if i else "Upper PV"))
+            axes[f"ke{i}"] = titleize(gs[i*2:(i+1)*2,2:4], ("" if i else "Kinetic energy"))
+            axes[f"en{i}"] = titleize(gs[i*2:(i+1)*2,4:6], ("" if i else "Enstrophy"))
+
+            anims += [
+                AnimatedImage(axes[f"pv{i}"], lambda j=i: self.models[j].q[0], cbar=False),
+                AnimatedImage(axes[f"ke{i}"], lambda j=i: self.ke(j), cbar=False, min_vmin=0),
+                AnimatedImage(axes[f"en{i}"], lambda j=i: self.en(j), cbar=False, min_vmin=0),
+                AnimatedLine(axes["spect"], lambda j=i: self.kespec(j), lw=3, label=labels[i])
+            ]
+
+            axes[f"pv{i}"].set_ylabel(labels[i], rotation=0, va='center', ha='right', fontsize=16)
+                                         
+        axes['spect'].set_ylim(1e-11, 3e-9)
+        axes['spect'].set_xlim(1e-5,  2e-4)
+        axes['spect'].legend(loc='best', fontsize=16)
+        axes['spect'].yaxis.tick_right()
+        axes['spect'].yaxis.set_label_position("right")
+        axes['spect'].set_ylabel('[m^2 s^-2]')
+        axes['spect'].set_xlabel('[m^-1]')
+
+        self.anims = anims
+        self.axes = axes
+
+    def animate(self):
+        for _ in range(self.steps_per_frame):
+            for m in self.models:
+                m._step_forward()
+        self.datasets = [pse.Dataset(m) for m in self.models]
+        res = []
+        for anim in self.anims:
+            res += anim.animate()
+        return res
+
 class ModelWithParticles():
     def __init__(self, m, grid_side=8):
         self.m = m
