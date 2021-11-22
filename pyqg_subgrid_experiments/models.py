@@ -86,10 +86,12 @@ class ScaledModel(object):
         return self.extract_vars(m, self.targets)
 
     def predict(self, inputs, device=None):
+        if device is None:
+            device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+            self.to(device)
         preds = []
         for x, in minibatch(self.input_scale.transform(self.extract_inputs(inputs))):
-            if device is not None:
-                x = x.to(device)
+            x = x.to(device)
             with torch.no_grad():
                 preds.append(self.forward(x).cpu().numpy())
         preds = self.output_scale.inverse_transform(np.vstack(preds))

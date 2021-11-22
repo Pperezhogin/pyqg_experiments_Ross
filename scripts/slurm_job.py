@@ -16,6 +16,10 @@ class SlurmJob(object):
         return self.kwargs.get('save_dir', None)
 
     @property
+    def save_to(self):
+        return self.kwargs.get('save_to', None)
+
+    @property
     def command(self):
         return ('singularity exec --nv --overlay ' + 
                 self.singularity_env +
@@ -55,6 +59,8 @@ class SlurmJob(object):
 
         if self.save_dir and self.save_command:
             lines += [f"#SBATCH -o {os.path.join(self.save_dir, self.job_name+'.out')}"]
+        elif self.save_to and self.save_command:
+            lines += [f"#SBATCH -o {self.save_to}.job.out"]
 
         lines += ["", "module purge", "", self.command]
 
@@ -71,6 +77,9 @@ class SlurmJob(object):
         if self.save_dir and self.save_command:
             os.system(f"mkdir -p {self.save_dir}")
             command_filename = os.path.join(self.save_dir, f"{self.job_name}.slurm")
+        elif self.save_to and self.save_command:
+            os.system(f"mkdir -p {os.path.dirname(self.save_to)}")
+            command_filename = f"{self.save_to}.job.slurm"
         else:
             command_filename = "tmp.slurm"
 

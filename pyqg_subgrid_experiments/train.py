@@ -26,7 +26,7 @@ train = pse.Dataset(args.train_set)
 
 param = pse.CNNParameterization.train_on(train, save_dir,
             inputs=args.inputs.split(","),
-            targets=args.target.split(","),
+            targets=args.targets.split(","),
             layerwise_inputs=args.layerwise_inputs,
             layerwise_targets=args.layerwise_targets,
             zero_mean=args.zero_mean,
