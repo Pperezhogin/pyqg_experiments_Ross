@@ -14,7 +14,7 @@ This repository contains code that uses [`pyqg`](https://pyqg.readthedocs.io/en/
 1. Clone this repository
 1. Run `pip install --editable .`
 
-More detailed version requirements will hopefully be determined soon.
+More detailed version requirements will be determined soon.
 
 ## Usage
 
@@ -52,6 +52,8 @@ pse.plot_helpers.compare_simulations(
     dataset.assign_attrs(label='Hi-res downscaled'),
     simulations.assign_attrs(label='Lo-res + ZB2020 param'))
 ```
+
+See [here](./examples) for more examples.
 
 ## More Details
 

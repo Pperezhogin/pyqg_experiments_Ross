@@ -1,0 +1,6 @@
+matplotlib
+numpy
+scipy
+torch
+xarray
+-e git://github.com/pyqg/pyqg.git#egg=pyqg
