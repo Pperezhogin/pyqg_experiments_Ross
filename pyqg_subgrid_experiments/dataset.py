@@ -6,7 +6,7 @@ import inspect
 import re
 from pyqg.diagnostic_tools import calc_ispec
 from collections import OrderedDict, defaultdict
-from scipy.stats import pearsonr, linregress, wasserstein_distance
+from scipy.stats import linregress, wasserstein_distance
 
 class cachedproperty(object):
   def __init__(self, function):

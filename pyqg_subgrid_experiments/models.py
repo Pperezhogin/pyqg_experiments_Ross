@@ -8,7 +8,6 @@ import numpy.fft as npfft
 import pyqg
 import xarray as xr
 from collections import OrderedDict
-from sklearn.isotonic import IsotonicRegression
 import pyqg_subgrid_experiments as pse
 
 def minibatch(*arrays, batch_size=64, as_tensor=True):

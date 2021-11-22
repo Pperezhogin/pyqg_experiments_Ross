@@ -564,9 +564,7 @@ def compare_simulations(*datasets, directory=None, new_fontsize=16):
         g.title("Temporal evolution of quantities, averaged over space/run")
         for quantity in quantities:
             for z in layers:
-                g.next()
-                if g.col == 0: plt.title(quantity)
-                if g.row == 0: plt.ylabel(f"z={z}", rotation=0, ha='right', va='center')
+                g.next(title=f"{quantity}, z={z}")
                 for ds in datasets:
                     time = ds.coords['time']
                     if time.dtype == np.dtype('<m8[ns]'):
@@ -578,14 +576,15 @@ def compare_simulations(*datasets, directory=None, new_fontsize=16):
                     
                 plt.legend()
 
-    with figure_grid(rows=len(layers), cols=len(quantities), filename=filename_for("quantity_distributions")) as g:
+    with figure_grid(rows=len(quantities), cols=len(layers), filename=filename_for("quantity_distributions"), rowwidth=12, rowheight=4) as g:
         g.title("Final distributions of quantities")
-        for z in layers:
-            for quantity in quantities:
-                distributions = [ds[quantity].isel(lev=z, time=-1).data.ravel() for ds in datasets]
+        for quantity in quantities:
+            for z in layers:
                 g.next(title=f"{quantity}, z={z}")
+                distributions = [ds[quantity].isel(lev=z, time=-1).data.ravel() for ds in datasets]
                 for ds, dist in zip(datasets, distributions):
                     kdeplot(dist, **ds.attrs['plot_kwargs'])
+                plt.legend(loc='best')
 
     n_spectra = 0
     for k in ds1.spectral_diagnostics:
@@ -609,7 +608,7 @@ def compare_simulations(*datasets, directory=None, new_fontsize=16):
                 g.next(title=f"{k}, barotropic\n({ds1[k].attrs['long_name']})")
                 plot_spectra(k, datasets)
 
-    with figure_grid(rows=1, cols=len(datasets), rowwidth=16, rowheight=8, filename=filename_for("energy_budgets")) as g:
+    with figure_grid(rows=len(datasets), cols=1, rowwidth=16, rowheight=8, filename=filename_for("energy_budgets")) as g:
         g.title("Spectral energy budgets")
         for ds in datasets:
             g.next()
