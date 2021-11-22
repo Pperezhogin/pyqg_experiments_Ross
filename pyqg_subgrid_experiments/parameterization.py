@@ -45,7 +45,7 @@ class Parameterization(object):
         else:
             raise ValueError(f"unknown targetset {keys}")
 
-    def test_on(self, dataset, artifact_dir=None, n_simulations=5, **kw):
+    def test_on(self, dataset, artifact_dir=None, n_simulations=5,**kw):
         if artifact_dir is not None:
             offline_path = os.path.join(artifact_dir, "offline_metrics.nc")
             online_dir = os.path.join(artifact_dir, "online_simulations")
@@ -53,19 +53,25 @@ class Parameterization(object):
             os.system(f"mkdir -p {online_dir}")
 
         # Compute offline metrics
-        preds = self.test_offline(dataset)
-        if artifact_dir is not None:
-            preds.to_netcdf(offline_path)
+        if artifact_dir is not None and os.path.exists(offline_path):
+            preds = xr.open_dataset(offline_path)
+        else:
+            preds = self.test_offline(dataset)
+            if artifact_dir is not None:
+                preds.to_netcdf(offline_path)
 
         # Run online simulations
         sim_params = dict(dataset.pyqg_params)
         sim_params.update(kw)
         sims = []
         for i in range(n_simulations):
-            sim = self.run_online(**sim_params)
+            if artifact_dir is not None and os.path.exists(os.path.join(online_dir, f"{i}.nc")):
+                sim = xr.open_dataset(os.path.join(online_dir, f"{i}.nc"))
+            else:
+                sim = self.run_online(**sim_params)
+                if artifact_dir is not None:
+                    sim.to_netcdf(os.path.join(online_dir, f"{i}.nc"))
             sims.append(sim)
-            if artifact_dir is not None:
-                sim.to_netcdf(os.path.join(online_dir, f"{i}.nc"))
         sims = xr.concat(sims, dim='run')
 
         # Compute online metrics
