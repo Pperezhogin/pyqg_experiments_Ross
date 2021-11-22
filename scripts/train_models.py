@@ -1,15 +1,14 @@
 import os
 import sys
 import argparse
+import pyqg_subgrid_experiments as pse
 dirname = os.path.dirname(os.path.realpath(__file__))
-sys.path.append(dirname)
-from slurm_job import SlurmJob
 
 model_dir = "/scratch/zanna/data/pyqg/models"
-job_script = os.path.join(dirname, 'train_model.py')
+job_script = os.path.join(dirname, '../pyqg_subgrid_experiments/train.py')
 
 def launch_job(**kwargs):
-    job = SlurmJob(job_script, time="12:00:00", mem="32GB", gpu="rtx8000:1", **kwargs)
+    job = pse.SlurmJob(job_script, time="12:00:00", mem="32GB", gpu="rtx8000:1", **kwargs)
     job.launch()
 
 argsets = {}
