@@ -12,14 +12,42 @@ def launch_job(**kwargs):
     job.launch()
 
 argsets = {}
-argsets["fullycnn"] = dict()
-argsets["fullycnn_no_constraints"] = dict(zero_mean=0)
-argsets["fullycnn_rescale_loss"] = dict(scaler='logpow')
-argsets["fullycnn_way2_forcing"] = dict(target='q_forcing_model')
-argsets["fullycnn_q_only"] = dict(inputs="q")
-argsets["fullycnn_uv_only"] = dict(inputs="u,v")
-for pct in [0.5,0.8,0.9,0.95,0.99]:
-    argsets[f"fullycnn_skip_{pct}"] = dict(skip_datasets=int(500*pct))
+
+inputs = [
+    'ddx_u,ddx_v',
+    'q',
+    'u,v',
+    'q,u,v',
+    'dqdt_through_lores',
+    'q,dqdt_through_lores',
+]
+
+outputs = [
+    'q_forcing_total',
+    'q_forcing_advection',
+    'uq_subgrid_flux,vq_subgrid_flux',
+    'u_forcing_advection,v_forcing_advection',
+    'uu_subgrid_flux,uv_subgrid_flux,vv_subgrid_flux',
+]
+
+for inp in inputs:
+    for outp in outputs:
+        for zero_mean in [0,1]:
+            for layer_in, layer_out in [(0,0), (1,1), (0,1)]:
+                key = '_'.join([
+                    'fcnn',
+                    inp.replace(',','-'),
+                    outp.replace(',','-'),
+                    f"zeromean{zero_mean}",
+                    f"layerwise{layer_in}{layer_out}"
+                ])
+                argsets[key] = dict(
+                    inputs=inp,
+                    outputs=outp,
+                    zero_mean=zero_mean,
+                    layerwise_inputs=layer_in,
+                    layerwise_outputs=layer_out
+                )
 
 for restart in range(3):
     for name, kw in argsets.items():
