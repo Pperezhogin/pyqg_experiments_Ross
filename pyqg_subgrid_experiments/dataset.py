@@ -82,6 +82,10 @@ class Dataset(object):
     def isel(self, *args, **kwargs):
         return self.__class__(self.ds.isel(*args, **kwargs))
 
+    def assign_attrs(self, **kw):
+        self.ds = self.ds.assign_attrs(**kw)
+        return self
+
     def train_test_split(self, test_frac=0.25):
         assert 'run' in self.ds.dims
         N = len(self.ds.run)
@@ -298,6 +302,7 @@ class Dataset(object):
         return range(len(self.lev))
 
     def distributional_distances(self, other):
+        other = self.__class__.wrap(other)
         distances = defaultdict(dict)
         datasets = [self, other]
 

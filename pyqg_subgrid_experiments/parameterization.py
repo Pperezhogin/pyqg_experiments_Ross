@@ -1,6 +1,9 @@
 import os
 import glob
+import json
 import numpy as np
+import xarray as xr
+import pyqg
 import pyqg_subgrid_experiments as pse
 from pyqg_subgrid_experiments.models import FullyCNN
 from pyqg_subgrid_experiments.simulate import generate_dataset
@@ -21,22 +24,57 @@ class Parameterization(object):
             return 'uv_parameterization'
 
     def __call__(self, m):
+        def arr(x):
+            if isinstance(x, xr.DataArray): x = x.data
+            return x.astype(m.q.dtype)
+
         preds = self.predict(m)
         keys = list(sorted(preds.keys()))
         assert keys == self.targets
         if len(keys) == 1:
-            return preds[keys[0]]
+            return arr(preds[keys[0]])
         elif keys == ['u_forcing_advection', 'v_forcing_advection']:
-            return tuple(preds[k] for k in keys)
+            return tuple(arr(preds[k]) for k in keys)
         elif keys == ['uq_subgrid_flux', 'vq_subgrid_flux']:
             ds = pse.Dataset.wrap(m)
-            return ds.ddx(preds['uq_subgrid_flux']) + ds.ddy(preds['vq_subgrid_flux'])
+            return arr(ds.ddx(preds['uq_subgrid_flux']) + ds.ddy(preds['vq_subgrid_flux']))
         elif 'uu_subgrid_flux' in keys and len(keys) == 3:
             ds = m if isinstance(m, pse.Dataset) else pse.Dataset(m)
-            return (ds.ddx(preds['uu_subgrid_flux']) + ds.ddy(preds['uv_subgrid_flux']),
-                    ds.ddx(preds['uv_subgrid_flux']) + ds.ddy(preds['vv_subgrid_flux']))
+            return (arr(ds.ddx(preds['uu_subgrid_flux']) + ds.ddy(preds['uv_subgrid_flux'])),
+                    arr(ds.ddx(preds['uv_subgrid_flux']) + ds.ddy(preds['vv_subgrid_flux'])))
         else:
             raise ValueError(f"unknown targetset {keys}")
+
+    def test_on(self, dataset, artifact_dir=None, n_simulations=25, **kw):
+        if artifact_dir is not None:
+            offline_path = os.path.join(artifact_dir, "offline_metrics.nc")
+            online_dir = os.path.join(artifact_dir, "online_simulations")
+            os.system(f"mkdir -p {artifact_dir}")
+            os.system(f"mkdir -p {online_dir}")
+
+        # Compute offline metrics
+        preds = self.test_offline(dataset)
+        if artifact_dir is not None:
+            preds.to_netcdf(offline_path)
+
+        # Run online simulations
+        sim_params = dict(dataset.pyqg_params)
+        sim_params.update(kw)
+        sims = []
+        for i in range(n_simulations):
+            sim = self.run_online(**sim_params)
+            sims.append(sim)
+            if artifact_dir is not None:
+                sim.to_netcdf(os.path.join(online_dir, f"{i}.nc"))
+        sims = xr.concat(sims, dim='run')
+
+        # Compute online metrics
+        distances = dataset.distributional_distances(sims)
+        if artifact_dir is not None:
+            with open(os.path.join(artifact_dir, "online_metrics.json"), "w") as f:
+                f.write(json.dumps(distances))
+
+        return preds, sims, distances
 
     def run_online(self, **kw):
         params = dict(kw)
@@ -101,9 +139,35 @@ class ZB2020Parameterization(Parameterization):
         return ['u_forcing_advection', 'v_forcing_advection']
 
     def predict(self, m):
-        Su, Sv = pse.Dataset.wrap(m).zb2020_parameterization
-        Su *= self.factor
-        Sv *= self.factor
+        if isinstance(m, pyqg.QGModel):
+            ik = 1j * m.k
+            il = 1j * m.l
+            
+            # Compute relative velocity derivatives in spectral space
+            uh = m.fft(m.u)
+            vh = m.fft(m.v)
+            vx = m.ifft(vh * ik)
+            vy = m.ifft(vh * il)
+            uy = m.ifft(uh * il)
+            ux = m.ifft(uh * ik)
+            
+            # Compute ZB2020 basis functions
+            rel_vort = vx - uy
+            shearing = vx + uy
+            stretching = ux - vy
+            
+            # Combine them in real space and take their FFT
+            rv_stretch = m.fft(rel_vort * stretching)
+            rv_shear = m.fft(rel_vort * shearing)
+            sum_sqs = m.fft(rel_vort**2 + shearing**2 + stretching**2) / 2.0
+            
+            # Take spectral-space derivatives and multiply by the scaling factor
+            Su = self.factor * m.ifft(ik*(sum_sqs - rv_shear) + il*rv_stretch)
+            Sv = self.factor * m.ifft(il*(sum_sqs + rv_shear) + ik*rv_stretch)
+        else:
+            Su, Sv = pse.Dataset.wrap(m).zb2020_parameterization
+            Su = Su.data * self.factor
+            Sv = Sv.data * self.factor
         return dict(u_forcing_advection=Su, v_forcing_advection=Sv)
 
 class CNNParameterization(Parameterization):

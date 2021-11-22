@@ -63,7 +63,7 @@ FORCING_ATTR_DATABASE = dict(
 def spatial_var(var, ds):
     return xr.DataArray(var, coords=dict([(d, ds.coords[d]) for d in spatial_dims]), dims=spatial_dims)
 
-def concat_and_convert(datasets):
+def concat_and_convert(datasets, drop_complex=1):
     # Concatenate datasets along the time dimension
     d = xr.concat(datasets, dim='time')
     
@@ -80,6 +80,11 @@ def concat_and_convert(datasets):
             d[k] = v.astype(np.float32)
         elif v.dtype == np.complex128:
             d[k] = v.astype(np.complex64)
+
+    # Potentially drop complex variables
+    if drop_complex:
+        complex_vars = [k for k,v in d.variables.items() if np.iscomplexobj(v)]
+        d = d.drop(complex_vars)
 
     return d
 
@@ -353,7 +358,6 @@ if __name__ == '__main__':
     parser.add_argument('--ag7531', type=int, default=0)
     parser.add_argument('--control', type=int, default=0)
     parser.add_argument('--transfer_test', type=int, default=0)
-    parser.add_argument('--drop_complex', type=int, default=1)
     args, extra = parser.parse_known_args()
 
     # Setup parameters for dataset generation functions
@@ -375,12 +379,4 @@ if __name__ == '__main__':
     else:
         ds = generate_forcing_dataset(**kwargs)
 
-    if args.drop_complex:
-        # Remove complex variables since they're technically redundant and
-        # standard NetCDF files won't support them
-        complex_vars = [k for k,v in ds.variables.items() if np.iscomplexobj(v)]
-        ds = ds.drop(complex_vars)
-        ds.to_netcdf(args.save_to)
-    else:
-        # Keep complex variables, but save using a different engine
-        ds.to_netcdf(args.save_to, engine="h5netcdf", invalid_netcdf=True)
+    ds.to_netcdf(args.save_to)

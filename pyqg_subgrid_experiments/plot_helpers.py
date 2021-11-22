@@ -407,72 +407,6 @@ class figure_grid():
 
     next = next_subplot
 
-def pyqg_kwargs_for(run):
-    import inspect
-    sig1 = inspect.signature(pyqg.Model.__init__)
-    sig2 = inspect.signature(pyqg.QGModel.__init__)
-    return dict([(k.split(':')[1], v) for k,v in run.attrs.items() 
-                    if 'pyqg' in k and 'nz' not in k and
-                         (k.split(':')[1] in sig1.parameters or k.split(':')[1] in sig2.parameters)])
-
-def pyqg_model_for(run):
-    return pyqg.QGModel(log_level=0, **pyqg_kwargs_for(run))
-
-def power_spectrum(key, run, z=None):
-    model = pyqg_model_for(run)
-    data = run[key].data
-    if z == 'sum': data = data.sum(axis=0)
-    elif z is not None: data = data[z]
-    return calc_ispec(model, data)
-
-def energy_budget(run):
-    m = pyqg_model_for(run)
-    
-    def get_diagnostic(s):
-        if s not in run and 'KEflux' in run:
-            return np.zeros_like(run['KEflux'].data)
-        else:
-            return run[s].data
-    
-    KE1spec, KE2spec = get_diagnostic('KEspec')
-    k, KE1spec = calc_ispec(m, KE1spec)
-    k, KE2spec = calc_ispec(m, KE2spec)
-    
-    ebud = [get_diagnostic('APEgenspec') / m.M**2,
-            get_diagnostic('APEflux')/ m.M**2,
-            get_diagnostic('KEflux')/ m.M**2,
-            -m.rek * m.del2 * get_diagnostic('KEspec')[1],
-            get_diagnostic('paramspec') / m.M**2,
-           ]
-    ebud.append(-np.stack(ebud).sum(axis=0))
-    ebud = [calc_ispec(m, term)[1] for term in ebud]
-    ebud = np.stack(ebud)
-        
-    budget = OrderedDict()
-    budget['APEgenspec'] = ebud[0]
-    budget['APEflux'] = ebud[1]
-    budget['KEflux'] = ebud[2]
-    budget['KEspec'] = ebud[3]
-    budget['Parameterization'] = ebud[4]
-    budget['Residual'] = ebud[5]
-    return k, budget
-
-def plot_energy_budget(run):
-    budgets = []
-    mean_budget = {}
-    for i in range(len(run.run)):
-        k, budget = energy_budget(run.isel(run=i))
-        budgets.append(budget)
-    for key,_ in budget.items():
-        s = np.array([b[key] for b in budgets])
-        mean_budget[key] = np.mean(s, axis=0)
-        plt.semilogx(k, np.mean(s,axis=0), label=key, lw=2)
-        plt.fill_between(k, np.percentile(s,5,axis=0), np.percentile(s,95,axis=0), alpha=0.25)
-    plt.legend(loc='best', ncol=2)
-    plt.axhline(0, color='gray', ls='--')
-    plt.xlabel("$k$ ($m^{-1}$)")
-    return mean_budget
-
 def kdeplot(data_, **kw):
     data = np.array(data_)
     kde = gaussian_kde(data)
@@ -483,21 +417,20 @@ def kdeplot(data_, **kw):
     plt.yticks([])
     plt.ylabel('Density')
 
-def compare_simulations(ds1, ds2, directory=None, new_fontsize=16):
+def compare_simulations(*datasets, directory=None, new_fontsize=16):
     if directory is not None:
         os.system(f"mkdir -p {directory}")
 
     orig_fontsize = plt.rcParams['font.size']
     plt.rcParams.update({ 'font.size': new_fontsize })
 
-    datasets = [ds1, ds2]
+    datasets = [pse.Dataset.wrap(d) for d in datasets]
+    ds1 = datasets[0]
 
     for i, ds in enumerate(datasets):
-        ds['ke'] = ds.ufull**2 + ds.vfull**2
-        ds['vorticity'] = (-ds.ufull.differentiate(coord='y') + ds.vfull.differentiate(coord='x'))
-        ds['enstrophy'] = ds['vorticity']**2
         if 'plot_kwargs' not in ds.attrs:
-            ds.assign_attrs(plot_kwargs=dict(label=f"Simulation {i+1}"))
+            label = ds.attrs.get('label', f"Simulation {i+1}")
+            ds = ds.assign_attrs(plot_kwargs=dict(label=label))
 
     def label_for(ds):
         return ds.attrs['plot_kwargs']['label']
@@ -507,8 +440,6 @@ def compare_simulations(ds1, ds2, directory=None, new_fontsize=16):
             return None
         else:
             return os.path.join(directory, f"{plot}.png")
-
-    comparisons = defaultdict(dict)
 
     quantities = ['q','u','v','ke','enstrophy']
 
@@ -549,19 +480,36 @@ def compare_simulations(ds1, ds2, directory=None, new_fontsize=16):
                     if g.col == 0: plt.ylabel(f"{label_for(ds)}, z={z}", rotation=0, ha='right', va='center')
                     imshow(ds[quantity].isel(lev=z, time=slice(-T, None), run=-1).mean(dim='time').data)
 
+    with figure_grid(rows=len(quantities), cols=len(layers), filename=filename_for("quantities_over_time"), rowwidth=12, rowheight=4) as g:
+        g.title("Temporal evolution of quantities, averaged over space/run")
+        for quantity in quantities:
+            for z in layers:
+                g.next()
+                if g.col == 0: plt.title(quantity)
+                if g.row == 0: plt.ylabel(f"z={z}", rotation=0, ha='right', va='center')
+                for ds in datasets:
+                    time = ds.coords['time']
+                    if time.dtype == np.dtype('<m8[ns]'):
+                        time = (time.data / np.timedelta64(1, 's')).astype(int)
+                    y = ds[quantity].isel(lev=z).mean(dim=['y','x','run']).data
+                    yerr = ds[quantity].isel(lev=z).std(dim=['y','x','run']).data
+                    plt.plot(time, y, label=label_for(ds))
+                    plt.fill_between(time, y-yerr, y+yerr, alpha=0.1)
+                    
+                plt.legend()
+
     with figure_grid(rows=len(layers), cols=len(quantities), filename=filename_for("quantity_distributions")) as g:
         g.title("Final distributions of quantities")
         for z in layers:
             for quantity in quantities:
                 distributions = [ds[quantity].isel(lev=z, time=-1).data.ravel() for ds in datasets]
-                distance = wasserstein_distance(*distributions)
-                comparisons[f"{quantity}_wasserstein_distance_z{z}"] = distance
-                g.next(title=f"{quantity}, z={z} (D={distance:.1e})")
+                g.next(title=f"{quantity}, z={z}")
                 for ds, dist in zip(datasets, distributions):
                     kdeplot(dist, **ds.attrs['plot_kwargs'])
 
     n_spectra = 0
-    for k,v in ds1.variables.items():
+    for k in ds1.spectral_diagnostics:
+        v = ds1[k]
         if 'l' in v.dims and 'k' in v.dims:
             if 'lev' in v.dims:
                 n_spectra += len(layers)
@@ -570,93 +518,67 @@ def compare_simulations(ds1, ds2, directory=None, new_fontsize=16):
 
     with figure_grid(cols=2, total=n_spectra, rowwidth=20, rowheight=6, filename=filename_for("spectra")) as g:
         g.title("Spectral comparisons")
-        for k,v in ds1.variables.items():
-            if 'l' in v.dims and 'k' in v.dims:
-                if 'lev' in v.dims:
-                    for z in layers:
-                        g.next(title=f"{k}, z={z}\n({ds1[k].attrs['long_name']})")
-                        slopes, curves = plot_spectra(k, datasets, z=z)
-                        comparisons[f"{k}_slope_difference_z{z}"] = slopes[1] - slopes[0]
-                        comparisons[f"{k}_curve_difference_z{z}"] = np.mean((curves[1] - curves[0])**2)
-                else:
-                    g.next(title=f"{k}, barotropic\n({ds1[k].attrs['long_name']})")
-                    slopes, curves = plot_spectra(k, datasets)
-                    comparisons[f"{k}_slope_difference_bar"] = slopes[1] - slopes[0]
-                    comparisons[f"{k}_curve_difference_bar"] = np.mean((curves[1] - curves[0])**2)
+        for k in ds1.spectral_diagnostics:
+            v = ds1[k]
+            if 'lev' in v.dims:
+                for z in layers:
+                    g.next(title=f"{k}, z={z}\n({ds1[k].attrs['long_name']})")
+                    plot_spectra(k, datasets, z=z)
+
+            else:
+                g.next(title=f"{k}, barotropic\n({ds1[k].attrs['long_name']})")
+                plot_spectra(k, datasets)
 
     with figure_grid(rows=1, cols=len(datasets), rowwidth=16, rowheight=8, filename=filename_for("energy_budgets")) as g:
         g.title("Spectral energy budgets")
         for ds in datasets:
             g.next()
-            budget = plot_energy_budget(ds)
-            plt.title(label_for(ds))#f"{label_for(ds)} (∫|residual|={np.abs(budget['Residual']).sum():.1e})")
+            k, budget = ds.energy_budget()
+            for key, val in budget.items():
+                plt.semilogx(k, val, label=key)
+            plt.legend(loc='best')
+            plt.title(label_for(ds))
 
     plt.rcParams.update({ 'font.size': orig_fontsize })
 
-    return comparisons
-
-def plot_spectra(quantity, runs, ax=None, z=None, log=True, leg=True, xlim=None, indiv=True, kmin=5e-5, kmax=1.5e-4, **kw):
+def plot_spectra(key, datasets, ax=None, z=None, loglog=True, leg=True, xlim=None, kmin=5e-5, kmax=1.5e-4, **kw):
     if ax is None: ax = plt.gca()
         
     maxes = []
-    
 
-    slopes = []
-    medians = []
+    for ds in datasets:
+        k, q = ds.isotropic_spectrum(key, z=z)
+        if q.min() < 0:
+            loglog = False
 
-    for r in runs:
-        if quantity not in r: continue
-        s_vals = []
-        line = None
-        for i in range(len(r.run)):
-            k,s = power_spectrum(quantity, r.isel(run=i), z=z)
-            s_vals.append(s)                
-        s = np.array(s_vals)
-        if s.min() < 0:
-            log = False
+    for ds in datasets:
+        k, q = ds.isotropic_spectrum(key, z=z)
 
-    for r in runs:
-        if quantity not in r: continue
-        s_vals = []
-        line = None
-        for i in range(len(r.run)):
-            k,s = power_spectrum(quantity, r.isel(run=i), z=z)
-            s_vals.append(s)                
-        s = np.array(s_vals)
-        plot_fn = ax.loglog if log else ax.semilogx
-        maxes.append(s.max())
-        q = np.percentile(s,50,axis=0)
+        if loglog:
+            plot_fn = ax.loglog
+        else:
+            plot_fn = ax.semilogx
 
-        kwargs = dict(r.attrs['plot_kwargs'])
+        kwargs = dict(ds.attrs.get('plot_kwargs', {}))
 
         i = np.argmin(np.abs(np.log(k) - np.log(kmin)))
         j = np.argmin(np.abs(np.log(k) - np.log(kmax)))
         lr = linregress(np.log(k[i:j]), np.log(q[i:j]))
-        slopes.append(lr.slope)
-        medians.append(q[:j])
 
-        if log:
+        if loglog:
             kwargs['label'] = kwargs.get('label', '') + " ($k^{"+f"{lr.slope:.2f}"+"}$)" 
 
         line = plot_fn(k,q,lw=3,**kwargs,zorder=10)
 
-        if log:
+        if loglog:
             plot_fn(k[i-1:j+1], np.exp(np.log(k[i-1:j+1]) * lr.slope + lr.intercept)*1.2, color=line[0]._color, ls='--', alpha=0.5)
 
-        ax.fill_between(k, np.percentile(s,5,axis=0), np.percentile(s,95,axis=0), alpha=0.1, color=line[0]._color)
-        if indiv:
-            for s in s_vals:
-                kw = dict(r.attrs['plot_kwargs'])
-                kw['color'] = line[0]._color
-                del kw['label']
-                plot_fn(k,s,alpha=0.075,zorder=9,**kw)
+        maxes.append(q.max())
 
     if xlim is not None:
         ax.set_xlim(*xlim)
     ax.set_xlabel("$k$ ($m^{-1}$)")
-    ax.set_ylabel(quantity)
-    if log: ax.set_ylim(min(maxes)/1000, max(maxes)*2)
+    ax.set_ylabel(key)
+    if loglog: ax.set_ylim(min(maxes)/1000, max(maxes)*2)
     if leg: ax.legend(loc='best',fontsize=12).set_zorder(11)
     ax.grid()
-
-    return slopes, medians
