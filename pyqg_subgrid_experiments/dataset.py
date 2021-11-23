@@ -193,7 +193,7 @@ class Dataset(object):
 
     @cachedproperty
     def vorticity(self):
-        return self.ddx('vfull') - self.ddx('ufull')
+        return self.ddx('vfull') - self.ddy('ufull')
 
     @cachedproperty
     def enstrophy(self):
