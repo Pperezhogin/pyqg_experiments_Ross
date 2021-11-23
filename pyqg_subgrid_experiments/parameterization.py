@@ -257,11 +257,17 @@ class CNNParameterization(Parameterization):
             ]
 
         # Train models on dataset and save them
+        models2 = []
         for z, model in enumerate(models):
-            X = model.extract_inputs(dataset)
-            Y = model.extract_targets(dataset)
-            model.fit(X, Y, num_epochs=num_epochs, **kw)
-            model.save(os.path.join(directory, f"models/{z}"))
+            model_dir = os.path.join(directory, f"models/{z}")
+            if os.path.exists(model_dir):
+                models2.append(model_class.load(model_dir))
+            else:
+                X = model.extract_inputs(dataset)
+                Y = model.extract_targets(dataset)
+                model.fit(X, Y, num_epochs=num_epochs, **kw)
+                model.save(os.path.join(directory, f"models/{z}"))
+                models2.append(model)
 
         # Return the trained parameterization
-        return cls(directory, models=models)
+        return cls(directory, models=models2)
