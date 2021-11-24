@@ -290,8 +290,8 @@ class AnimatedSimulationGroup(object):
         axes['spect'].legend(loc='best', fontsize=16)
         axes['spect'].yaxis.tick_right()
         axes['spect'].yaxis.set_label_position("right")
-        axes['spect'].set_ylabel('[m^2 s^-2]')
-        axes['spect'].set_xlabel('[m^-1]')
+        axes['spect'].set_ylabel('KE spectrum $\kappa^2 |\hat{\psi}|^2 (L / \Delta x)^2$ [m^2 s^-2]')
+        axes['spect'].set_xlabel('Radial wavenumber $\kappa$ [m^-1]')
 
         self.anims = anims
         self.axes = axes
