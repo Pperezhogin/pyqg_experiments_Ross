@@ -128,7 +128,10 @@ class ScaledModel(object):
 
     def save(self, path):
         os.system(f"mkdir -p {path}")
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.cpu()
         torch.save(self.state_dict(), f"{path}/weights.pt")
+        self.to(device)
         with open(f"{path}/input_scale.pkl", 'wb') as f:
             pickle.dump(self.input_scale, f)
         with open(f"{path}/output_scale.pkl", 'wb') as f:
