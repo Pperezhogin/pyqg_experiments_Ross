@@ -100,14 +100,30 @@ def test_running():
     param = pse.CNNParameterization.train_on(
             dataset,
             pdir,
-            inputs=['q'],
-            targets=['q_forcing_advection'],
+            inputs=['u','v'],
+            targets=['u_forcing_advection','v_forcing_advection'],
             num_epochs=0)
 
     offline = param.test_offline(dataset)
 
     # This is a random prediction, so it should have low correlation
     assert np.abs(offline.correlation.mean()) < 0.05
+
+    # Make sure we got the shape / matchup correct
+    dataset2 = pse.Dataset(
+        xr.concat([dataset.ds, dataset.ds, dataset.ds], 'run')
+    )
+
+    offline2 = param.test_offline(dataset2)
+
+    pred_std = float(np.std(offline.u_forcing_advection_predictions.data))
+
+    for i in range(3):
+        np.testing.assert_allclose(
+            offline2.u_forcing_advection_predictions.data[i],
+            offline.u_forcing_advection_predictions.data[0],
+            atol=pred_std/1000
+        )
 
     pyqg_kwargs = dataset.pyqg_params
     pyqg_kwargs['tmax'] = pyqg_kwargs['dt'] * 1

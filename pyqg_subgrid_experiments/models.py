@@ -10,10 +10,11 @@ import xarray as xr
 from collections import OrderedDict
 import pyqg_subgrid_experiments as pse
 
-def minibatch(*arrays, batch_size=64, as_tensor=True):
+def minibatch(*arrays, batch_size=64, as_tensor=True, shuffle=True):
     assert len(set([len(a) for a in arrays])) == 1
     order = np.arange(len(arrays[0]))
-    np.random.shuffle(order)
+    if shuffle:
+        np.random.shuffle(order)
     steps = int(np.ceil(len(arrays[0]) / batch_size))
     xform = torch.as_tensor if as_tensor else lambda x: x
     for step in range(steps):
@@ -64,17 +65,17 @@ class ScaledModel(object):
         if not isinstance(m, pse.Dataset):
             m = pse.Dataset(m)
 
-        arr = np.array([
-            m.extract_feature(feat).isel(lev=z).data
+        arr = np.stack([
+            np.array(m.extract_feature(feat).isel(lev=z).data)
             for feat, z in features
-        ])
+        ], axis=-3)
 
-        arr = np.moveaxis(arr, 0, -3)
+        #arr = np.moveaxis(arr, 0, -3)
 
-        arr = arr.reshape(-1, len(features), m.nx, m.nx)
+        arr = arr.reshape((-1, len(features), m.nx, m.nx))
 
         if spatially_flatten:
-            arr = arr.reshape(-1, len(features), m.nx**2)
+            arr = arr.reshape((-1, len(features), m.nx**2))
 
         return arr.astype(dtype)
 
@@ -88,12 +89,23 @@ class ScaledModel(object):
         if device is None:
             device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
             self.to(device)
+        
+        X = self.input_scale.transform(self.extract_inputs(inputs))
+
         preds = []
-        for x, in minibatch(self.input_scale.transform(self.extract_inputs(inputs))):
+        for x, in minibatch(X, shuffle=False):
             x = x.to(device)
             with torch.no_grad():
                 preds.append(self.forward(x).cpu().numpy())
+
         preds = self.output_scale.inverse_transform(np.vstack(preds))
+
+        s = list(inputs.q.shape)
+        preds = np.stack([
+            preds[:,i].reshape(s[:-3] + s[-2:])
+            for i in range(len(self.targets))
+        ], axis=-3)
+
         if isinstance(inputs, pyqg.Model):
             return preds.astype(inputs.q.dtype)
         else:

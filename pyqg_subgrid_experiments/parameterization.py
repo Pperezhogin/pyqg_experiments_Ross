@@ -197,17 +197,16 @@ class CNNParameterization(Parameterization):
 
         for model in self.models:
             pred = model.predict(m)
-            assert len(pred.shape) == 4
-            assert len(model.targets) == pred.shape[1]
-            for channel in range(pred.shape[1]):
+            assert len(pred.shape) == len(m.q.shape)
+            for channel in range(pred.shape[-3]):
                 target, z = model.targets[channel]
                 if target not in preds:
                     preds[target] = np.zeros_like(m.q)
-                m_indices = [slice(None) for _ in m.q.shape]
-                m_indices[-3] = slice(z,z+1)
-                m_shape = [s for s in m.q.shape]
-                m_shape[-3] = 1
-                preds[target][m_indices] = pred[:,channel,:,:].reshape(m_shape)
+                out_indices = [slice(None) for _ in m.q.shape]
+                out_indices[-3] = slice(z,z+1)
+                in_indices = [slice(None) for _ in m.q.shape]
+                in_indices[-3] = slice(channel,channel+1)
+                preds[target][tuple(out_indices)] = pred[tuple(in_indices)]
 
         return preds
 
