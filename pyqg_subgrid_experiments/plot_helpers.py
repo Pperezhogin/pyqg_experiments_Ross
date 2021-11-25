@@ -156,7 +156,7 @@ class AnimatedLine(AnimatedPlot):
             self.ax.set_xlim(x[i]/10,x[j]*10)
             self.ax.set_ylim(y[j]/10,y[i]*10)
             line_y = np.exp(np.log(x[i:]) * lr.slope + lr.intercept)*fudge
-            text_t = "$\propto k^{"+f"{lr.slope:.2f}"+"}$"
+            text_t = r"$\propto k^{"+f"{lr.slope:.2f}"+"}$"
         text_x = x[i]*fudge
         text_y = y[i]
         if self.best_fit is None:
@@ -290,8 +290,8 @@ class AnimatedSimulationGroup(object):
         axes['spect'].legend(loc='best', fontsize=16)
         axes['spect'].yaxis.tick_right()
         axes['spect'].yaxis.set_label_position("right")
-        axes['spect'].set_ylabel('KE spectrum $\kappa^2 |\hat{\psi}|^2 (L / \Delta x)^2$ [m^2 s^-2]')
-        axes['spect'].set_xlabel('Radial wavenumber $\kappa$ [m^-1]')
+        axes['spect'].set_ylabel(r"KE spectrum $\kappa^2 |\hat{\psi}|^2 (L / \Delta x)^2$ [m^2 s^-2]")
+        axes['spect'].set_xlabel(r"Radial wavenumber $\kappa$ [m^-1]")
 
         self.anims = anims
         self.axes = axes
