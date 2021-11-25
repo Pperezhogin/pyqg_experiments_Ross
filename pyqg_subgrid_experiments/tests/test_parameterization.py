@@ -147,6 +147,12 @@ def test_zb2020_parameterization():
     assert offline.correlation.mean() > 0.9
     assert offline.skill.mean() > 0.9
 
+    for q in ['u_forcing_advection','v_forcing_advection']:
+        for s in ['_', '_spatial_', '_temporal_']:
+            v = offline[f"{q}{s}correlation"]
+            assert v.min() >= -1
+            assert v.max() <= 1
+
 def test_target_variants():
     dataset = load_dataset()
 
