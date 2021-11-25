@@ -116,18 +116,9 @@ class Parameterization(object):
             test[f"{key}_temporal_skill"] = 1 - test[f"{key}_temporal_mse"] / true_var.mean(dim=space)
             test[f"{key}_skill"] = 1 - test[f"{key}_mse"] / true_var.mean(dim=both)
 
-            test[f"{key}_spatial_correlation"] = (
-                true_pred_cov.sum(dim=time)
-                / (true_var.sum(dim=time) * pred_var.sum(dim=time))**0.5
-            )
-            test[f"{key}_temporal_correlation"] = (
-                true_pred_cov.sum(dim=space)
-                / (true_var.sum(dim=space) * pred_var.sum(dim=space))**0.5
-            )
-            test[f"{key}_correlation"] = (
-                true_pred_cov.sum(dim=both)
-                / (true_var.sum(dim=both) * pred_var.sum(dim=both))**0.5
-            )
+            test[f"{key}_spatial_correlation"] = xr.corr(truth, preds, dim=time)
+            test[f"{key}_temporal_correlation"] = xr.corr(truth, preds, dim=space)
+            test[f"{key}_correlation"] = xr.corr(truth, preds, dim=both)
 
         for metric in ['correlation', 'mse', 'skill']:
             test[metric] = sum(

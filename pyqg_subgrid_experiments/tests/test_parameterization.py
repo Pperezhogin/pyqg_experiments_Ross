@@ -109,6 +109,12 @@ def test_running():
     # This is a random prediction, so it should have low correlation
     assert np.abs(offline.correlation.mean()) < 0.05
 
+    for q in ['u_forcing_advection','v_forcing_advection']:
+        for s in ['_', '_spatial_', '_temporal_']:
+            v = offline[f"{q}{s}correlation"]
+            assert v.min() >= -1
+            assert v.max() <= 1
+
     # Make sure we got the shape / matchup correct
     dataset2 = pse.Dataset(
         xr.concat([dataset.ds, dataset.ds, dataset.ds], 'run')
