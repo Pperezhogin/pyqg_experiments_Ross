@@ -497,7 +497,7 @@ def kdeplot(data_, **kw):
     plt.yticks([])
     plt.ylabel('Density')
 
-def compare_simulations(*datasets, directory=None, new_fontsize=16):
+def compare_simulations(*datasets, directory=None, new_fontsize=16, title_suffix='', show_quantities=True):
     if directory is not None:
         os.system(f"mkdir -p {directory}")
 
@@ -540,7 +540,7 @@ def compare_simulations(*datasets, directory=None, new_fontsize=16):
         plt.colorbar()
     
     with figure_grid(rows=len(layers)*len(datasets), cols=len(quantities), filename=filename_for("quantity_final_values")) as g:
-        g.title("Final values of quantities")
+        g.title(f"Final values of quantities{title_suffix}")
         for z in layers:
             for ds in datasets:
                 for quantity in quantities:
@@ -550,7 +550,7 @@ def compare_simulations(*datasets, directory=None, new_fontsize=16):
                     imshow(ds[quantity].isel(lev=z, time=-1, run=-1).data)
 
     with figure_grid(rows=len(layers)*len(datasets), cols=len(quantities), filename=filename_for("quantity_time_averaged_values")) as g:
-        g.title("Quantities time-averaged over last half of simulation")
+        g.title(f"Quantities time-averaged over last half of simulation{title_suffix}")
         for z in layers:
             for ds in datasets:
                 T = len(ds.time)//2
@@ -561,7 +561,7 @@ def compare_simulations(*datasets, directory=None, new_fontsize=16):
                     imshow(ds[quantity].isel(lev=z, time=slice(-T, None), run=-1).mean(dim='time').data)
 
     with figure_grid(rows=len(quantities), cols=len(layers), filename=filename_for("quantities_over_time"), rowwidth=12, rowheight=4) as g:
-        g.title("Temporal evolution of quantities, averaged over space/run")
+        g.title(f"Temporal evolution of quantities, averaged over space/run{title_suffix}")
         for quantity in quantities:
             for z in layers:
                 g.next(title=f"{quantity}, z={z}")
@@ -577,7 +577,7 @@ def compare_simulations(*datasets, directory=None, new_fontsize=16):
                 plt.legend()
 
     with figure_grid(rows=len(quantities), cols=len(layers), filename=filename_for("quantity_distributions"), rowwidth=12, rowheight=4) as g:
-        g.title("Final distributions of quantities")
+        g.title(f"Final distributions of quantities{title_suffix}")
         for quantity in quantities:
             for z in layers:
                 g.next(title=f"{quantity}, z={z}")
@@ -596,7 +596,7 @@ def compare_simulations(*datasets, directory=None, new_fontsize=16):
                 n_spectra += 1
 
     with figure_grid(cols=2, total=n_spectra, rowwidth=20, rowheight=6, filename=filename_for("spectra")) as g:
-        g.title("Spectral comparisons")
+        g.title(f"Spectral comparisons{title_suffix}")
         for k in ds1.spectral_diagnostics:
             v = ds1[k]
             if 'lev' in v.dims:
@@ -609,7 +609,7 @@ def compare_simulations(*datasets, directory=None, new_fontsize=16):
                 plot_spectra(k, datasets)
 
     with figure_grid(rows=len(datasets), cols=1, rowwidth=16, rowheight=8, filename=filename_for("energy_budgets")) as g:
-        g.title("Spectral energy budgets")
+        g.title(f"Spectral energy budgets{title_suffix}")
         for ds in datasets:
             g.next()
             k, budget = ds.energy_budget()

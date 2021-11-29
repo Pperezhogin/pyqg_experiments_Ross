@@ -45,40 +45,20 @@ class Parameterization(object):
         else:
             raise ValueError(f"unknown targetset {keys}")
 
-    def test_on(self, dataset, artifact_dir=None, n_simulations=5,**kw):
+    def test_on(self, dataset, artifact_dir=None, **kw):
         if artifact_dir is not None:
+            os.system(f"mkdir -p {artifact_dir}")
             offline_path = os.path.join(artifact_dir, "offline_metrics.nc")
             online_dir = os.path.join(artifact_dir, "online_simulations")
-            os.system(f"mkdir -p {artifact_dir}")
-            os.system(f"mkdir -p {online_dir}")
+        else:
+            offline_path = None
+            online_dir = None
 
         # Compute offline metrics
-        if artifact_dir is not None and os.path.exists(offline_path):
-            preds = xr.open_dataset(offline_path)
-        else:
-            preds = self.test_offline(dataset)
-            if artifact_dir is not None:
-                preds.to_netcdf(offline_path)
+        preds = self.test_offline(dataset, offline_path=offline_path)
 
         # Run online simulations
-        sim_params = dict(dataset.pyqg_params)
-        sim_params.update(kw)
-        sims = []
-        for i in range(n_simulations):
-            if artifact_dir is not None and os.path.exists(os.path.join(online_dir, f"{i}.nc")):
-                sim = xr.open_dataset(os.path.join(online_dir, f"{i}.nc"))
-            else:
-                sim = self.run_online(**sim_params)
-                if artifact_dir is not None:
-                    sim.to_netcdf(os.path.join(online_dir, f"{i}.nc"))
-            sims.append(sim)
-        sims = xr.concat(sims, dim='run')
-
-        # Compute online metrics
-        distances = dataset.distributional_distances(sims)
-        if artifact_dir is not None:
-            with open(os.path.join(artifact_dir, "online_metrics.json"), "w") as f:
-                f.write(json.dumps(distances))
+        sims, distances = self.test_online(dataset, online_dir=online_dir, **kw)
 
         return preds, sims, distances
 
@@ -86,9 +66,46 @@ class Parameterization(object):
         params = dict(kw)
         params[self.parameterization_type] = self
         return generate_dataset(**params)
+    
+    def test_online(self, dataset, n_simulations=5, online_dir=None, **kw):
+        if online_dir is not None:
+            os.system(f"mkdir -p {online_dir}")
+            distance_path = os.path.join(online_dir, "distances.json")
+        else:
+            distance_path = None
+        
+        # Run online simulations
+        sim_params = dict(dataset.pyqg_params)
+        sim_params.update(kw)
+        sims = []
+        for i in range(n_simulations):
+            if online_dir is not None and os.path.exists(os.path.join(online_dir, f"{i}.nc")):
+                sim = xr.open_dataset(os.path.join(online_dir, f"{i}.nc"))
+            else:
+                sim = self.run_online(**sim_params)
+                if online_dir is not None:
+                    sim.to_netcdf(os.path.join(online_dir, f"{i}.nc"))
+            sims.append(sim)
+        sims = xr.concat(sims, dim='run')
 
-    def test_offline(self, dataset):
+        # Compute online metrics
+        if distance_path is not None and os.path.exists(distance_path):
+            with open(distance_path, 'r') as f:
+                distances = json.loads(f.read())
+        else:
+            distances = dataset.distributional_distances(sims)
+            if distance_path is not None:
+                with open(distance_path, 'w') as f:
+                    f.write(json.dumps(distances))
+
+        return sims, distances
+
+    def test_offline(self, dataset, offline_path=None):
+        if offline_path is not None and os.path.exists(offline_path):
+            return xr.open_dataset(offline_path)
+        
         test = dataset[self.targets]
+        
         for key, val in self.predict(dataset).items():
             truth = test[key]
             test[f"{key}_predictions"] = truth*0 + val
@@ -124,6 +141,9 @@ class Parameterization(object):
             test[metric] = sum(
                 test[f"{key}_{metric}"] for key in self.targets
             ) / len(self.targets)
+            
+        if offline_path is not None:
+            test.to_netcdf(offline_path)
 
         return test
 
