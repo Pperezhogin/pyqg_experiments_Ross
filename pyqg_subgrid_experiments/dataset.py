@@ -85,6 +85,10 @@ class Dataset(object):
     def assign_attrs(self, **kw):
         self.ds = self.ds.assign_attrs(**kw)
         return self
+    
+    def load(self):
+        self.ds = self.ds.load()
+        return self
 
     def train_test_split(self, test_frac=0.25):
         assert 'run' in self.ds.dims
@@ -179,6 +183,17 @@ class Dataset(object):
     # Helpers for computing physical quantities
     #
     ###########################################
+    
+    @property
+    def final_q(self):
+        if 'run' in self.dims:
+            q = self.q.isel(time=-1, run=-1).data.astype(self.m.q.dtype)
+        elif 'time' in self.dims:
+            q = self.q.isel(time=-1).data.astype(self.m.q.dtype)
+        else:
+            q = self.q.data.astype(self.m.q.dtype)
+        assert q.shape == self.m.q.shape
+        return q    
 
     @property
     def nx(self):

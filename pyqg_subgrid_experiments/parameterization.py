@@ -6,7 +6,7 @@ import xarray as xr
 import pyqg
 import pyqg_subgrid_experiments as pse
 from pyqg_subgrid_experiments.models import FullyCNN
-from pyqg_subgrid_experiments.simulate import generate_dataset
+from pyqg_subgrid_experiments.simulate import generate_dataset, time_until_uncorrelated
 
 class Parameterization(object):
     @property
@@ -15,6 +15,10 @@ class Parameterization(object):
 
     def predict(self):
         raise NotImplementedError
+        
+    @property
+    def nx(self):
+        return 64
 
     @property
     def parameterization_type(self):
@@ -65,7 +69,25 @@ class Parameterization(object):
     def run_online(self, **kw):
         params = dict(kw)
         params[self.parameterization_type] = self
+        params['nx'] = self.nx
         return generate_dataset(**params)
+    
+    def decorrelation_timescale(self, dataset, **kw):
+        ds = pse.Dataset.wrap(dataset)
+        params1 = dict(ds.pyqg_params)
+        
+        params2 = dict(params1)
+        params2[self.parameterization_type] = self
+        params2['nx'] = self.nx
+        params2['ny'] = self.nx
+        
+        m1 = pyqg.QGModel(**params1)
+        m1.set_q1q2(*ds.final_q)
+        m1._invert()
+        
+        m2 = pyqg.QGModel(**params2)
+        
+        return time_until_uncorrelated(m1, m2, **kw)
     
     def test_online(self, dataset, n_simulations=5, online_dir=None, **kw):
         if online_dir is not None:
@@ -77,6 +99,7 @@ class Parameterization(object):
         # Run online simulations
         sim_params = dict(dataset.pyqg_params)
         sim_params.update(kw)
+        sim_params['nx'] = self.nx
         sims = []
         for i in range(n_simulations):
             if online_dir is not None and os.path.exists(os.path.join(online_dir, f"{i}.nc")):
@@ -148,8 +171,8 @@ class Parameterization(object):
         return test
 
 class ZB2020Parameterization(Parameterization):
-    def __init__(self, factor=-46761284):
-        self.factor = factor
+    def __init__(self, factor=-46761284, factor_mult=1.0):
+        self.factor = factor * factor_mult
 
     @property
     def targets(self):

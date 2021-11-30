@@ -315,7 +315,7 @@ def time_until_uncorrelated(m1, m2, thresh=0.5, perturbation_sd=1e-10, max_times
         if m1.nx == m2.nx:
             return var
         elif var.shape == m1.q.shape:
-            return m2.ifft(downscaled(m1.fft(var)))
+            return m2.ifft(possibly_downscaled(m1.fft(var)))
         elif var.shape == m1.qh.shape:
             return np.hstack((
                 var[:,:keep,:keep+1],

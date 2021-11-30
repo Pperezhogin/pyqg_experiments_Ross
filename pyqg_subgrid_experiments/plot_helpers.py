@@ -497,7 +497,7 @@ def kdeplot(data_, **kw):
     plt.yticks([])
     plt.ylabel('Density')
 
-def compare_simulations(*datasets, directory=None, new_fontsize=16, title_suffix='', show_quantities=True):
+def compare_simulations(*datasets, directory=None, new_fontsize=16, title_suffix='', show_quantities=True, show_timeseries=True, show_distributions=True, show_spectra=True, show_budgets=True):
     if directory is not None:
         os.system(f"mkdir -p {directory}")
 
@@ -539,52 +539,55 @@ def compare_simulations(*datasets, directory=None, new_fontsize=16, title_suffix
         plt.yticks([])
         plt.colorbar()
     
-    with figure_grid(rows=len(layers)*len(datasets), cols=len(quantities), filename=filename_for("quantity_final_values")) as g:
-        g.title(f"Final values of quantities{title_suffix}")
-        for z in layers:
-            for ds in datasets:
-                for quantity in quantities:
-                    g.next()
-                    if g.row == 0: plt.title(quantity)
-                    if g.col == 0: plt.ylabel(f"{label_for(ds)}, z={z}", rotation=0, ha='right', va='center')
-                    imshow(ds[quantity].isel(lev=z, time=-1, run=-1).data)
-
-    with figure_grid(rows=len(layers)*len(datasets), cols=len(quantities), filename=filename_for("quantity_time_averaged_values")) as g:
-        g.title(f"Quantities time-averaged over last half of simulation{title_suffix}")
-        for z in layers:
-            for ds in datasets:
-                T = len(ds.time)//2
-                for quantity in quantities:
-                    g.next()
-                    if g.row == 0: plt.title(quantity)
-                    if g.col == 0: plt.ylabel(f"{label_for(ds)}, z={z}", rotation=0, ha='right', va='center')
-                    imshow(ds[quantity].isel(lev=z, time=slice(-T, None), run=-1).mean(dim='time').data)
-
-    with figure_grid(rows=len(quantities), cols=len(layers), filename=filename_for("quantities_over_time"), rowwidth=12, rowheight=4) as g:
-        g.title(f"Temporal evolution of quantities, averaged over space/run{title_suffix}")
-        for quantity in quantities:
+    if show_quantities:
+        with figure_grid(rows=len(layers)*len(datasets), cols=len(quantities), filename=filename_for("quantity_final_values")) as g:
+            g.title(f"Final values of quantities{title_suffix}")
             for z in layers:
-                g.next(title=f"{quantity}, z={z}")
                 for ds in datasets:
-                    time = ds.coords['time']
-                    if time.dtype == np.dtype('<m8[ns]'):
-                        time = (time.data / np.timedelta64(1, 's')).astype(int)
-                    y = ds[quantity].isel(lev=z).mean(dim=['y','x','run']).data
-                    yerr = ds[quantity].isel(lev=z).std(dim=['y','x','run']).data
-                    plt.plot(time, y, label=label_for(ds))
-                    plt.fill_between(time, y-yerr, y+yerr, alpha=0.1)
-                    
-                plt.legend()
+                    for quantity in quantities:
+                        g.next()
+                        if g.row == 0: plt.title(quantity)
+                        if g.col == 0: plt.ylabel(f"{label_for(ds)}, z={z}", rotation=0, ha='right', va='center')
+                        imshow(ds[quantity].isel(lev=z, time=-1, run=-1).data)
 
-    with figure_grid(rows=len(quantities), cols=len(layers), filename=filename_for("quantity_distributions"), rowwidth=12, rowheight=4) as g:
-        g.title(f"Final distributions of quantities{title_suffix}")
-        for quantity in quantities:
+        with figure_grid(rows=len(layers)*len(datasets), cols=len(quantities), filename=filename_for("quantity_time_averaged_values")) as g:
+            g.title(f"Quantities time-averaged over last half of simulation{title_suffix}")
             for z in layers:
-                g.next(title=f"{quantity}, z={z}")
-                distributions = [ds[quantity].isel(lev=z, time=-1).data.ravel() for ds in datasets]
-                for ds, dist in zip(datasets, distributions):
-                    kdeplot(dist, **ds.attrs['plot_kwargs'])
-                plt.legend(loc='best')
+                for ds in datasets:
+                    T = len(ds.time)//2
+                    for quantity in quantities:
+                        g.next()
+                        if g.row == 0: plt.title(quantity)
+                        if g.col == 0: plt.ylabel(f"{label_for(ds)}, z={z}", rotation=0, ha='right', va='center')
+                        imshow(ds[quantity].isel(lev=z, time=slice(-T, None), run=-1).mean(dim='time').data)
+                        
+    if show_timeseries:
+        with figure_grid(rows=len(quantities), cols=len(layers), filename=filename_for("quantities_over_time"), rowwidth=12, rowheight=4) as g:
+            g.title(f"Temporal evolution of quantities, averaged over space/run{title_suffix}")
+            for quantity in quantities:
+                for z in layers:
+                    g.next(title=f"{quantity}, z={z}")
+                    for ds in datasets:
+                        time = ds.coords['time']
+                        if time.dtype == np.dtype('<m8[ns]'):
+                            time = (time.data / np.timedelta64(1, 's')).astype(int)
+                        y = ds[quantity].isel(lev=z).mean(dim=['y','x','run']).data
+                        yerr = ds[quantity].isel(lev=z).std(dim=['y','x','run']).data
+                        plt.plot(time, y, label=label_for(ds))
+                        plt.fill_between(time, y-yerr, y+yerr, alpha=0.1)
+
+                    plt.legend()
+
+    if show_distributions:
+        with figure_grid(rows=len(quantities), cols=len(layers), filename=filename_for("quantity_distributions"), rowwidth=12, rowheight=4) as g:
+            g.title(f"Final distributions of quantities{title_suffix}")
+            for quantity in quantities:
+                for z in layers:
+                    g.next(title=f"{quantity}, z={z}")
+                    distributions = [ds[quantity].isel(lev=z, time=-1).data.ravel() for ds in datasets]
+                    for ds, dist in zip(datasets, distributions):
+                        kdeplot(dist, **ds.attrs['plot_kwargs'])
+                    plt.legend(loc='best')
 
     n_spectra = 0
     for k in ds1.spectral_diagnostics:
@@ -595,28 +598,30 @@ def compare_simulations(*datasets, directory=None, new_fontsize=16, title_suffix
             else:
                 n_spectra += 1
 
-    with figure_grid(cols=2, total=n_spectra, rowwidth=20, rowheight=6, filename=filename_for("spectra")) as g:
-        g.title(f"Spectral comparisons{title_suffix}")
-        for k in ds1.spectral_diagnostics:
-            v = ds1[k]
-            if 'lev' in v.dims:
-                for z in layers:
-                    g.next(title=f"{k}, z={z}\n({ds1[k].attrs['long_name']})")
-                    plot_spectra(k, datasets, z=z)
+    if show_spectra:
+        with figure_grid(cols=2, total=n_spectra, rowwidth=20, rowheight=6, filename=filename_for("spectra")) as g:
+            g.title(f"Spectral comparisons{title_suffix}")
+            for k in ds1.spectral_diagnostics:
+                v = ds1[k]
+                if 'lev' in v.dims:
+                    for z in layers:
+                        g.next(title=f"{k}, z={z}\n({ds1[k].attrs['long_name']})")
+                        plot_spectra(k, datasets, z=z)
 
-            else:
-                g.next(title=f"{k}, barotropic\n({ds1[k].attrs['long_name']})")
-                plot_spectra(k, datasets)
+                else:
+                    g.next(title=f"{k}, barotropic\n({ds1[k].attrs['long_name']})")
+                    plot_spectra(k, datasets)
 
-    with figure_grid(rows=len(datasets), cols=1, rowwidth=16, rowheight=8, filename=filename_for("energy_budgets")) as g:
-        g.title(f"Spectral energy budgets{title_suffix}")
-        for ds in datasets:
-            g.next()
-            k, budget = ds.energy_budget()
-            for key, val in budget.items():
-                plt.semilogx(k, val, label=key)
-            plt.legend(loc='best')
-            plt.title(label_for(ds))
+    if show_budgets:
+        with figure_grid(rows=len(datasets), cols=1, rowwidth=16, rowheight=8, filename=filename_for("energy_budgets")) as g:
+            g.title(f"Spectral energy budgets{title_suffix}")
+            for ds in datasets:
+                g.next()
+                k, budget = ds.energy_budget()
+                for key, val in budget.items():
+                    plt.semilogx(k, val, label=key)
+                plt.legend(loc='best')
+                plt.title(label_for(ds))
 
     plt.rcParams.update({ 'font.size': orig_fontsize })
 
@@ -661,3 +666,5 @@ def plot_spectra(key, datasets, ax=None, z=None, loglog=True, leg=True, xlim=Non
     if loglog: ax.set_ylim(min(maxes)/1000, max(maxes)*2)
     if leg: ax.legend(loc='best',fontsize=12).set_zorder(11)
     ax.grid()
+
+    
