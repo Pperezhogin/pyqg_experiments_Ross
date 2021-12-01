@@ -177,7 +177,7 @@ class Dataset(object):
     def ddy(self, q):
         """Take y derivative in spectral space"""
         return self.ifft(self.fft(self[q]) * 1j * self.l)
-
+    
     ###########################################
     #
     # Helpers for computing physical quantities
@@ -362,6 +362,13 @@ class Dataset(object):
                     distances[f"{varname}_loglog_inter_difference"] = lr1.intercept - lr2.intercept
 
         return distances
+    
+    @property
+    def label(self):
+        if 'label' in self.attrs:
+            return self.attrs['label']
+        elif 'plot_kwargs' in self.attrs and 'label' in self.attrs['plot_kwargs']:
+            return self.attrs['plot_kwargs']['label']
 
 def pyqg_kwargs_for(run):
     sig1 = inspect.signature(pyqg.Model.__init__)

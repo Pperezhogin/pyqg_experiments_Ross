@@ -426,6 +426,20 @@ def animate_simulation(m, n_frames=100, steps_per_frame=100, label=None, suptitl
     anim = animation.FuncAnimation(fig, animate, frames=n_frames, interval=50, blit=True)
     return anim
 
+def imshow(arr, **kw):
+    if isinstance(arr, xr.DataArray):
+        arr = arr.data
+    if arr.min() >= 0:
+        cmap = 'inferno'; vmin = 0; vmax = np.percentile(arr.ravel(), 99)
+    else:
+        cmap = 'bwr'; vmax = np.percentile(np.abs(arr).ravel(), 99); vmin = -vmax
+    plt.imshow(arr, cmap=cmap, interpolation='none', vmin=vmin, vmax=vmax)
+    for ticks in [plt.xticks, plt.yticks]:
+        ticks([0,len(arr)//2, len(arr)], ['0', 'L/2', 'L'])
+    plt.xlabel("Longitude $x$"); plt.ylabel("Latitude $y$")
+    cb = plt.colorbar(**kw)
+    cb.ax.yaxis.set_offset_position('left')
+
 class figure_grid():
     def next_subplot(self, title=None, **kwargs):
         if self.next_title is not None:
@@ -508,9 +522,10 @@ def compare_simulations(*datasets, directory=None, new_fontsize=16, title_suffix
     ds1 = datasets[0]
 
     for i, ds in enumerate(datasets):
-        if 'plot_kwargs' not in ds.attrs:
-            label = ds.attrs.get('label', f"Simulation {i+1}")
-            ds = ds.assign_attrs(plot_kwargs=dict(label=label))
+        plot_kwargs = ds.attrs.get('plot_kwargs', {})
+        if 'label' not in plot_kwargs:
+            plot_kwargs['label'] = ds.attrs.get('label', f"Simulation {i+1}")
+            ds = ds.assign_attrs(plot_kwargs=plot_kwargs)
 
     def label_for(ds):
         return ds.attrs['plot_kwargs']['label']
@@ -644,6 +659,7 @@ def plot_spectra(key, datasets, ax=None, z=None, loglog=True, leg=True, xlim=Non
             plot_fn = ax.semilogx
 
         kwargs = dict(ds.attrs.get('plot_kwargs', {}))
+        kwargs['label'] = ds.label
 
         i = np.argmin(np.abs(np.log(k) - np.log(kmin)))
         j = np.argmin(np.abs(np.log(k) - np.log(kmax)))
