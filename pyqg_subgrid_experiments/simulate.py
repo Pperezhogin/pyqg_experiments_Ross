@@ -15,35 +15,35 @@ DEFAULT_PYQG_PARAMS = dict(nx=64, dt=3600., tmax=10*YEAR, tavestart=5*YEAR)
 
 FORCING_ATTR_DATABASE = dict(
     uq_subgrid_flux=dict(
-        long_name="x-component of advected PV subgrid flux, $\overline{u}\,\overline{q} - \overline{uq}$",
+        long_name=r"x-component of advected PV subgrid flux, $\overline{u}\,\overline{q} - \overline{uq}$",
         units="meters second ^-2",
     ),
     vq_subgrid_flux=dict(
-        long_name="y-component of advected PV subgrid flux, $\overline{v}\,\overline{q} - \overline{vq}$",
+        long_name=r"y-component of advected PV subgrid flux, $\overline{v}\,\overline{q} - \overline{vq}$",
         units="meters second ^-2",
     ),
     uu_subgrid_flux=dict(
-        long_name="xx-component of advected velocity subgrid flux, $\overline{u}^2 - \overline{u^2}$",
+        long_name=r"xx-component of advected velocity subgrid flux, $\overline{u}^2 - \overline{u^2}$",
         units="meters second ^-2",
     ),
     uv_subgrid_flux=dict(
-        long_name="xy-component of advected velocity subgrid flux, $\overline{u}\,\overline{v} - \overline{uv}$",
+        long_name=r"xy-component of advected velocity subgrid flux, $\overline{u}\,\overline{v} - \overline{uv}$",
         units="meters second ^-2",
     ),
     vv_subgrid_flux=dict(
-        long_name="yy-component of advected velocity subgrid flux, $\overline{v}^2 - \overline{v^2}$",
+        long_name=r"yy-component of advected velocity subgrid flux, $\overline{v}^2 - \overline{v^2}$",
         units="meters second ^-2",
     ),
     q_forcing_advection=dict(
-        long_name="PV subgrid forcing from advection, $\overline{(\mathbf{u} \cdot \\nabla)q} - (\overline{\mathbf{u}} \cdot \overline{\\nabla})\overline{q}$",
+        long_name=r"PV subgrid forcing from advection, $\overline{(\mathbf{u} \cdot \nabla)q} - (\overline{\mathbf{u}} \cdot \overline{\nabla})\overline{q}$",
         units="second ^-2",
     ),
     u_forcing_advection=dict(
-        long_name="x-velocity subgrid forcing from advection, $\overline{(\mathbf{u} \cdot \\nabla)u} - (\overline{\mathbf{u}} \cdot \overline{\\nabla})\overline{u}$",
+        long_name=r"x-velocity subgrid forcing from advection, $\overline{(\mathbf{u} \cdot \nabla)u} - (\overline{\mathbf{u}} \cdot \overline{\nabla})\overline{u}$",
         units="second ^-2",
     ),
     v_forcing_advection=dict(
-        long_name="y-velocity subgrid forcing from advection, $\overline{(\mathbf{u} \cdot \\nabla)v} - (\overline{\mathbf{u}} \cdot \overline{\\nabla})\overline{v}$",
+        long_name=r"y-velocity subgrid forcing from advection, $\overline{(\mathbf{u} \cdot \nabla)v} - (\overline{\mathbf{u}} \cdot \overline{\nabla})\overline{v}$",
         units="second ^-2",
     ),
     dqdt_through_lores=dict(
@@ -187,21 +187,29 @@ def run_simulation(m, sampling_freq=1000, sampling_dist='uniform'):
         m._step_forward()
     return concat_and_convert(snapshots)
 
-def run_forcing_simulations(m1, m2, sampling_freq=1000, sampling_dist='uniform', filter=None):
-    keep = m2.qh.shape[1]//2
-    filtr = np.exp(-m2.wv**2 * (2*m2.dx)**2 / 24)
-    fac = (m1.nx // m2.nx)**2
+def spectral_filter_and_coarsen(hires_var, m1, m2, filtr=None):
+    if not isinstance(m1, pyqg.QGModel):
+        m1 = pse.Dataset.wrap(m1).m
+        m2 = pse.Dataset.wrap(m2).m
 
+    if hires_var.shape == m1.q.shape:
+        return m2.ifft(spectral_filter_and_coarsen(m1.fft(hires_var), m1, m2, filtr))
+    elif hires_var.shape == m1.qh.shape:
+        if filtr is None:
+            filtr = np.exp(-m2.wv**2 * (2*m2.dx)**2 / 24)
+        elif filtr == 'builtin':
+            filtr = m2.filtr
+        keep = m2.qh.shape[1]//2
+        return np.hstack((
+            hires_var[:,:keep,:keep+1],
+            hires_var[:,-keep:,:keep+1]
+        )) * filtr / (m1.nx // m2.nx)**2
+    else:
+        raise ValueError
+
+def run_forcing_simulations(m1, m2, sampling_freq=1000, sampling_dist='uniform', filtr=None):
     def downscaled(hires_var):
-        if hires_var.shape == m1.q.shape:
-            return m2.ifft(downscaled(m1.fft(hires_var)))
-        elif hires_var.shape == m1.qh.shape:
-            return np.hstack((
-                hires_var[:,:keep,:keep+1],
-                hires_var[:,-keep:,:keep+1]
-            )) * filtr / fac
-        else:
-            raise ValueError
+        return spectral_filter_and_coarsen(hires_var, m1, m2, filtr)
 
     def advected(var):
         if var.shape == m1.q.shape:
