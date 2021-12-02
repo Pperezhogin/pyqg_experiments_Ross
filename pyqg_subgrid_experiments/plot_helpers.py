@@ -642,7 +642,7 @@ def compare_simulations(*datasets, directory=None, new_fontsize=16, title_suffix
 
     plt.rcParams.update({ 'font.size': orig_fontsize })
 
-def plot_spectra(key, datasets, ax=None, z=None, loglog=True, leg=True, xlim=None, kmin=5e-5, kmax=1.5e-4, fontsize=16, **kw):
+def plot_spectra(key, datasets, ax=None, z=None, loglog=True, leg=True, xlim=None, kmin=5e-5, kmax=1.5e-4, fontsize=16, legend_fontsize=16, **kw):
     if ax is None: ax = plt.gca()
         
     maxes = []
@@ -683,7 +683,7 @@ def plot_spectra(key, datasets, ax=None, z=None, loglog=True, leg=True, xlim=Non
     if xlim is not None:
         ax.set_xlim(*xlim)
     if loglog: ax.set_ylim(min(maxes)/1000, max(maxes)*2)
-    if leg: ax.legend(loc='best',fontsize=12).set_zorder(11)
+    if leg: ax.legend(loc='best',fontsize=legend_fontsize).set_zorder(11)
     ax.grid()
 
     prefix = ''
