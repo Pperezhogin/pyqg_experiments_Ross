@@ -8,6 +8,7 @@ import xarray as xr
 import json
 from scipy.stats import pearsonr
 from pyqg.xarray_output import spatial_dims
+import pyqg_subgrid_experiments as pse
 
 YEAR = 24*60*60*360.
 

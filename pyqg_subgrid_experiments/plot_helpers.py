@@ -437,6 +437,8 @@ def imshow(arr, **kw):
     for ticks in [plt.xticks, plt.yticks]:
         ticks([0,len(arr)//2, len(arr)], ['0', 'L/2', 'L'])
     plt.xlabel("Longitude $x$"); plt.ylabel("Latitude $y$")
+    if 'title' in kw:
+        plt.title(kw.pop('title'))
     cb = plt.colorbar(**kw)
     cb.ax.yaxis.set_offset_position('left')
 
@@ -502,9 +504,9 @@ class figure_grid():
     next = next_subplot
 
 def kdeplot(data_, **kw):
-    data = np.array(data_)
+    data = np.array(data_).ravel()
     kde = gaussian_kde(data)
-    lo, hi = np.percentile(data.ravel(), [5, 95])
+    lo, hi = np.percentile(data, [7.5, 92.5])
     diff = (hi-lo)
     lims = np.linspace(lo - diff*0.1, hi + diff*0.1, 200)
     plt.plot(lims, kde(lims), **kw)
@@ -640,7 +642,7 @@ def compare_simulations(*datasets, directory=None, new_fontsize=16, title_suffix
 
     plt.rcParams.update({ 'font.size': orig_fontsize })
 
-def plot_spectra(key, datasets, ax=None, z=None, loglog=True, leg=True, xlim=None, kmin=5e-5, kmax=1.5e-4, **kw):
+def plot_spectra(key, datasets, ax=None, z=None, loglog=True, leg=True, xlim=None, kmin=5e-5, kmax=1.5e-4, fontsize=16, **kw):
     if ax is None: ax = plt.gca()
         
     maxes = []
@@ -652,6 +654,9 @@ def plot_spectra(key, datasets, ax=None, z=None, loglog=True, leg=True, xlim=Non
 
     for ds in datasets:
         k, q = ds.isotropic_spectrum(key, z=z)
+        
+        if key in ['APEflux','KEflux','APEgenspec','Dissipation']:
+            q = q / ds.m.M**2
 
         if loglog:
             plot_fn = ax.loglog
@@ -677,10 +682,27 @@ def plot_spectra(key, datasets, ax=None, z=None, loglog=True, leg=True, xlim=Non
 
     if xlim is not None:
         ax.set_xlim(*xlim)
-    ax.set_xlabel("$k$ ($m^{-1}$)")
-    ax.set_ylabel(key)
     if loglog: ax.set_ylim(min(maxes)/1000, max(maxes)*2)
     if leg: ax.legend(loc='best',fontsize=12).set_zorder(11)
     ax.grid()
 
+    prefix = ''
+    if z == 0:
+        prefix = "Upper "
+    if z == 1: 
+        prefix = "Lower "
+    if z == 'sum':
+        prefix = "Barotropic "
     
+    ylabel = key
+        
+    if key in ['KEspec']:
+        ylabel = "KE spectrum ($m^{2} s^{-2}$)"
+    if key in ['Ensspec','entspec']:
+        ylabel = "Enstrophy spectrum ($s^{-2}$)"
+    if key in ['APEflux','KEflux','APEgenspec','Dissipation']:
+        units = "$m^{2} s^{-3}$"
+        ylabel = f"{prefix}Normalized {key.replace('flux', ' flux').replace('genspec', ' generation')} ({units})"
+        
+    ax.set_ylabel(prefix+ylabel, fontsize=fontsize)
+    ax.set_xlabel("Radial wavenumber $k$ ($m^{-1}$)", fontsize=fontsize)
