@@ -204,7 +204,7 @@ class AnimatedImage(AnimatedPlot):
         ax.set_xticks([])
         ax.set_yticks([])
         self.max_vmax = max_vmax
-        self.vmax = min(np.percentile(np.abs(x), 99)*1.01, self.max_vmax)
+        self.vmax = min(np.percentile(np.abs(x).ravel(), 99)*1.01, self.max_vmax)
         if min_vmin == 0:
             self.vmin = 0
             self.cmap = 'inferno'
@@ -240,13 +240,13 @@ class AnimatedSimulationGroup(object):
         return self.ds(i).enstrophy.sum(dim='lev').data
 
     def kespec(self, i):
-        m = self.models[i]
         try:
-            return calc_ispec(m, m.get_diagnostic('KEspec').sum(axis=0))
+            return self.ds(i).isotropic_spectrum('KEspec', z='sum')
         except:
+            m = self.models[i]
             return calc_ispec(m, m.diagnostics['KEspec']['function'](m).sum(axis=0))
 
-    def __init__(self, models, labels, steps_per_frame=100, title=None):
+    def __init__(self, models, labels=None, steps_per_frame=100, title=None):
         fig = plt.figure(figsize=(16.75,3.25*len(models)))
 
         if title is not None:
@@ -264,11 +264,14 @@ class AnimatedSimulationGroup(object):
             return ax
 
         axes = dict(spect=titleize(gs[:,6:], "Kinetic energy spectra"))
-
-        self.models = models
-        self.labels = labels
-        self.datasets = [pse.Dataset(m) for m in models]
-
+        
+        self.datasets = [pse.Dataset.wrap(m) for m in models]
+        self.models = [ds.m for ds in self.datasets]
+        if labels is None:
+            self.labels = [ds.label for ds in self.datasets]
+        else:
+            self.labels = labels
+        
         anims = []
 
         for i in range(len(models)):
@@ -277,7 +280,7 @@ class AnimatedSimulationGroup(object):
             axes[f"en{i}"] = titleize(gs[i*2:(i+1)*2,4:6], ("" if i else "Enstrophy"))
 
             anims += [
-                AnimatedImage(axes[f"pv{i}"], lambda j=i: self.models[j].q[0], cbar=False),
+                AnimatedImage(axes[f"pv{i}"], lambda j=i: self.q(j, 0), cbar=False),
                 AnimatedImage(axes[f"ke{i}"], lambda j=i: self.ke(j), cbar=False, min_vmin=0),
                 AnimatedImage(axes[f"en{i}"], lambda j=i: self.en(j), cbar=False, min_vmin=0),
                 AnimatedLine(axes["spect"], lambda j=i: self.kespec(j), lw=3, label=labels[i])
@@ -290,8 +293,8 @@ class AnimatedSimulationGroup(object):
         axes['spect'].legend(loc='best', fontsize=16)
         axes['spect'].yaxis.tick_right()
         axes['spect'].yaxis.set_label_position("right")
-        axes['spect'].set_ylabel(r"KE spectrum $\kappa^2 |\hat{\psi}|^2 (L / \Delta x)^2$ [m^2 s^-2]")
-        axes['spect'].set_xlabel(r"Radial wavenumber $\kappa$ [m^-1]")
+        axes['spect'].set_ylabel(r"KE spectrum $\kappa^2 |\hat{\psi}|^2 (L / \Delta x)^2$ [$m^2 s^-2$]", fontsize=14)
+        axes['spect'].set_xlabel(r"Radial wavenumber $\kappa$ [$m^-1$]", fontsize=14)
 
         self.anims = anims
         self.axes = axes
