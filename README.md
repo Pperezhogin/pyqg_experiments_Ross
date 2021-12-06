@@ -24,33 +24,62 @@ More detailed version requirements will be determined soon.
 import pyqg_subgrid_experiments as pse
 
 # Load a dataset (thin wrapper around xarray.Dataset)
-dataset = pse.Dataset("/scratch/zanna/pyqg/data/train/*.nc")
+forcing_eddy_train = pse.Dataset("/scratch/zanna/pyqg/data/train/*.nc")
+forcing_eddy_test = pse.Dataset("/scratch/zanna/pyqg/data/test/*.nc")
+forcing_jets_test = pse.Dataset("/scratch/zanna/pyqg/data/transfer/*.nc")
 
 # Variables directly included
-dataset.q_forcing_advection # shape = (n_runs, n_steps, 2, 64, 64)
-dataset.u.shape
-dataset.v.shape
+forcing_eddy_train.q_forcing_advection # shape = (n_runs, n_steps, 2, 64, 64)
+forcing_eddy_train.u.shape
+forcing_eddy_train.v.shape
 
 # Differentiation in spectral space
-dataset.ddx('u')
-dataset.ddy('u')
+forcing_eddy_train.ddx('u')
+forcing_eddy_train.ddy('u')
 
 # Arbitrary DSL for extracting features (useful for symbolic regression)
-dataset.extract_feature('ddx_u_times_q_plus_ddy_v_times_q')
+forcing_eddy_train.extract_feature('ddx_u_times_q_plus_ddy_v_times_q')
 
 # Initialize a parameterization
 param = pse.ZB2020Parameterization()
 
-# Test it against a dataset, both offline and online
-offline_metrics, simulations, online_metrics = param.test_on(dataset)
+# Compute offline metrics
+offline_metrics_eddy = param.test_offline(forcing_eddy_test)
+print(offline_metrics_eddy.correlation)
+print(offline_metrics_eddy.u_forcing_advection_temporal_correlation)
+offline_metrics_jets = param.test_offline(forcing_jets_test)
+print(offline_metrics_jets.correlation)
+print(offline_metrics_jets.u_forcing_advection_temporal_correlation)
 
-# Examine offline metrics
-print(offline_metrics.correlation)
+# Run online simulations
+param_eddy = pse.Dataset(xr.concat(
+    param.run_online(**forcing_eddy_test.pyqg_params) for _ in range(5),
+    'run'
+))
+param_jets = pse.Dataset(xr.concat(
+    param.run_online(**forcing_jets_test.pyqg_params) for _ in range(5),
+    'run'
+))
 
-# Examine online performance
+# Compare online performance to baselines
+hires_eddy = pse.Dataset("/scratch/zanna/pyqg/data/test/hires/*.nc")
+lores_eddy = pse.Dataset("/scratch/zanna/pyqg/data/test/lores/*.nc")
+hires_jets = pse.Dataset("/scratch/zanna/pyqg/data/transfer/hires/*.nc")
+lores_jets = pse.Dataset("/scratch/zanna/pyqg/data/transfer/lores/*.nc")
+
 pse.plot_helpers.compare_simulations(
-    dataset.assign_attrs(label='Hi-res downscaled'),
-    simulations.assign_attrs(label='Lo-res + ZB2020 param'))
+    lores_eddy.assign_attrs(label='Lo-res'),
+    param_eddy.assign_attrs(label='Lo-res + param'),
+    hires_eddy.assign_attrs(label='Hi-res'),
+    title_suffix=', Eddy Config'
+)
+
+pse.plot_helpers.compare_simulations(
+    lores_jets.assign_attrs(label='Lo-res'),
+    param_jets.assign_attrs(label='Lo-res + param'),
+    hires_jets.assign_attrs(label='Hi-res'),
+    title_suffix=', Jet Config'
+)
 ```
 
 See [here](./examples) for more examples.

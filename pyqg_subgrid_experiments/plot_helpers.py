@@ -628,13 +628,13 @@ def compare_simulations(*datasets, directory=None, new_fontsize=16, title_suffix
                 else:
                     g.next(title=f"{k}, barotropic\n({ds1[k].attrs['long_name']})")
                     plot_spectra(k, datasets)
-
+                    
     if show_budgets:
         with figure_grid(rows=len(datasets), cols=1, rowwidth=16, rowheight=8, filename=filename_for("energy_budgets")) as g:
             g.title(f"Spectral energy budgets{title_suffix}")
             for ds in datasets:
                 g.next()
-                k, budget = ds.energy_budget()
+                k, budget = ds.energy_budget
                 for key, val in budget.items():
                     plt.semilogx(k, val, label=key)
                 plt.legend(loc='best')

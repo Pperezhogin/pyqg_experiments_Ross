@@ -100,6 +100,13 @@ class Dataset(object):
         return self.isel(run=order[:cutoff]), self.isel(run=order[cutoff:])
 
     def extract_feature(self, feature):
+        """Extract a possibly-derived feature from the dataset using a string
+        DSL to handle arbitrary combinations of features using addition,
+        multiplication, and differentiation. For example,
+        `ds.extract_feature('ddx_u_plus_ddy_v_times_q')` is equivalent to
+        `(ds.ddx('u') + ds.ddy('v')) * q`.
+        
+        TODO: expand DSL to support parentheses"""
         def split_by(s): 
             parts = feature.split(s)
             part1 = parts[0]
@@ -186,6 +193,8 @@ class Dataset(object):
     
     @property
     def final_q(self):
+        """Return the final value of the potential vorticity (for the final
+        run, if there are multiple runs)"""
         if 'run' in self.dims:
             q = self.q.isel(time=-1, run=-1).data.astype(self.m.q.dtype)
         elif 'time' in self.dims:
@@ -197,9 +206,12 @@ class Dataset(object):
 
     @property
     def nx(self):
+        """Number of grid points in the x/y directions"""
         return self.m.nx
     
     def advected(self, q):
+        """Apply the advection operator to the quantity `q` in spectral space
+        (and inverting back), assuming incompressibility"""
         return self.ddx(self[q] * self.ufull) + self.ddy(self[q] * self.vfull)
 
     @cachedproperty
@@ -247,6 +259,11 @@ class Dataset(object):
     ###########################################
 
     def isotropic_spectrum(self, key, z=None, agg=np.mean, time_avg=True):
+        """Compute the spectrum of a given diagnostic quantity in terms of the
+        radial wavenumber (possibly averaged across snapshots at different
+        simulation timesteps if `time_avg`, possibly at a given depth `z` (or
+        summed if `z='sum'`) and aggregated across different simulation runs).
+        """
         if key == 'Dissipation':
             assert z is None
             m = self.m
@@ -285,7 +302,7 @@ class Dataset(object):
 
         return k, spectrum
 
-    def energy_budget(self, **kw):
+    def calc_energy_budget(self, **kw):
         budget = OrderedDict()
         k, apegen = self.isotropic_spectrum('APEgenspec', **kw)
         budget['APE generation'] = apegen
@@ -295,8 +312,24 @@ class Dataset(object):
         budget['Parameterization'] = self.isotropic_spectrum('paramspec', **kw)[1]
         budget['Residual'] = np.array(list(budget.values())).sum(axis=0)
         return k, budget
+    
+    @cachedproperty
+    def energy_budget(self):
+        return self.calc_energy_budget()
+    
+    @property
+    def normalized_energy_budget(self):
+        """Return elements of the energy budget normalized to account for the
+        discrete Fourier transform"""
+        k, budget = self.energy_budget
+        normalized = {}
+        for key, val in budget.items():
+            normalized[key] = val / self.m.M**2
+        return k, normalized
 
     def spectral_linregress(self, key, kmin=5e-5, kmax=1.5e-4, **kw):
+        """Run linear regression in log-log space for the spectrum given by
+        `key` over a frequency range of `kmin` to `kmax`"""
         k, spectrum = self.isotropic_spectrum(key, **kw)
         i = np.argmin(np.abs(np.log(k) - np.log(kmin)))
         j = np.argmin(np.abs(np.log(k) - np.log(kmax)))

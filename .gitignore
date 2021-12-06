@@ -12,3 +12,4 @@ pyqg_subgrid_experiments/tests/tmp
 *.pyc
 dist
 pip-wheel-metadata
+tmp/
