@@ -184,6 +184,12 @@ class Dataset(object):
     def ddy(self, q):
         """Take y derivative in spectral space"""
         return self.ifft(self.fft(self[q]) * 1j * self.l)
+
+    def div(self, *xy):
+        x, y = xy; return self.ddx(x) + self.ddy(y)
+
+    def curl(self, *xy):
+        x, y = xy; return self.ddx(y) - self.ddy(x)
     
     ###########################################
     #

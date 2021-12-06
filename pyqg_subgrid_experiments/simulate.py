@@ -165,7 +165,7 @@ def generate_cnn_parameterized_dataset(cnn0, cnn1, sampling_freq=1000, sampling_
     m = initialize_cnn_parameterized_model(cnn0, cnn1, **kwargs)
     return run_simulation(m, sampling_freq=sampling_freq, sampling_dist=sampling_dist)
 
-def generate_forcing_dataset(hires=256, lores=64, sampling_freq=1000, sampling_dist='uniform', filter=None, **pyqg_params):
+def generate_forcing_dataset(hires=256, lores=64, sampling_freq=1000, sampling_dist='uniform', filtr=None, **pyqg_params):
     params1 = dict(DEFAULT_PYQG_PARAMS)
     params1.update(pyqg_params)
     params1['nx'] = hires
@@ -177,7 +177,7 @@ def generate_forcing_dataset(hires=256, lores=64, sampling_freq=1000, sampling_d
     m1 = pyqg.QGModel(**params1)
     m2 = pyqg.QGModel(**params2)
 
-    ds = run_forcing_simulations(m1, m2, sampling_freq=sampling_freq, sampling_dist=sampling_dist, filter=filter)
+    ds = run_forcing_simulations(m1, m2, sampling_freq=sampling_freq, sampling_dist=sampling_dist, filtr=filtr)
     return ds.assign_attrs(pyqg_params=json.dumps(params2))
 
 def run_simulation(m, sampling_freq=1000, sampling_dist='uniform'):
@@ -271,6 +271,8 @@ def run_forcing_simulations(m1, m2, sampling_freq=1000, sampling_dist='uniform',
                 zero = ds.q*0
                 if len(val.shape) == 3: val = val[np.newaxis]
                 ds[key] = zero + val
+
+            m1._invert()
 
             save_var('q_forcing_advection', downscaled(advected(m1.q)) - advected(m2.q))
             save_var('u_forcing_advection', downscaled(advected(m1.ufull)) - advected(m2.ufull))

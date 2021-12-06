@@ -506,15 +506,16 @@ class figure_grid():
 
     next = next_subplot
 
-def kdeplot(data_, **kw):
+def kdeplot(data_, ax=None, **kw):
+    if ax is None: ax = plt.gca()
     data = np.array(data_).ravel()
     kde = gaussian_kde(data)
     lo, hi = np.percentile(data, [7.5, 92.5])
     diff = (hi-lo)
     lims = np.linspace(lo - diff*0.1, hi + diff*0.1, 200)
-    plt.plot(lims, kde(lims), **kw)
-    plt.yticks([])
-    plt.ylabel('Density')
+    ax.plot(lims, kde(lims), **kw)
+    ax.set_yticks([])
+    ax.set_ylabel('Density')
 
 def compare_simulations(*datasets, directory=None, new_fontsize=16, title_suffix='', show_quantities=True, show_timeseries=True, show_distributions=True, show_spectra=True, show_budgets=True):
     if directory is not None:
