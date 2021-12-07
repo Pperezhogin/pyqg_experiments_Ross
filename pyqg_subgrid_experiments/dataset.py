@@ -3,6 +3,7 @@ import numpy as np
 import numpy.fft as npfft
 import xarray as xr
 import inspect
+import operator
 import re
 from pyqg.diagnostic_tools import calc_ispec
 from collections import OrderedDict, defaultdict
@@ -102,36 +103,49 @@ class Dataset(object):
     def extract_feature(self, feature):
         """Extract a possibly-derived feature from the dataset using a string
         DSL to handle arbitrary combinations of features using addition,
-        multiplication, and differentiation. For example,
-        `ds.extract_feature('ddx_u_plus_ddy_v_times_q')` is equivalent to
-        `(ds.ddx('u') + ds.ddy('v')) * q`.
+        multiplication, and differentiation, with intermediate caching.
         
-        TODO: expand DSL to support parentheses"""
-        def split_by(s): 
-            parts = feature.split(s)
-            part1 = parts[0]
-            part2 = s.join(parts[1:])
-            return self.extract_feature(part1), self.extract_feature(part2)
-
+        For example,
+            
+            ds.extract_feature('mul(q, add(ddx(u), ddy(v)))')
+            
+        would be equivalent to
+        
+            q * (ds.ddx('u') + ds.ddy('v'))
+            
+        """
+        def extract_pair(s):
+            depth = 0
+            for i, char in enumerate(s):
+                if char == "(":
+                    depth += 1
+                elif char == ")":
+                    depth -= 1
+                elif char == "," and depth == 0:
+                    return self.extract_feature(s[:i].strip()), self.extract_feature(s[i+1:].strip())
+            raise ValueError(f"string {s} is not a comma-separated pair")
+        
         if feature not in self.ds:
-            if '_times_' in feature:
-                part1, part2 = split_by('_times_')
-                self.ds[feature] = part1 * part2
-            elif '_plus_' in feature:
-                part1, part2 = split_by('_plus_')
-                self.ds[feature] = part1 + part2
-            elif '_minus_' in feature:
-                part1, part2 = split_by('_minus_')
-                self.ds[feature] = part1 - part2
-            elif feature.startswith('ddx_'):
-                self.ds[feature] = self.ddx(self.extract_feature(feature[4:]))
-            elif feature.startswith('ddy_'):
-                self.ds[feature] = self.ddy(self.extract_feature(feature[4:]))
+            match = re.search(f"^([a-z]+)\((.*)\)$", feature)
+            if match:
+                op, inner = match.group(1), match.group(2)
+                if op in ['mul', 'add', 'sub']:
+                    self.ds[feature] = getattr(operator, op)(*extract_pair(inner))
+                elif op in ['neg', 'abs']:
+                    self.ds[feature] = getattr(operator, op)(self.extract_feature(inner))
+                elif op in ['ddx', 'ddy']:
+                    self.ds[feature] = getattr(self, op)(self.extract_feature(inner))
+                else:
+                    raise ValueError(f"could not interpret {feature}")
             elif feature == 'dqdt_through_lores':
                 if 'dqdt' in self.ds:
                     self.ds[feature] = self.ds['dqdt']
                 else:
                     self.ds[feature] = self.real_var(self.m.ifft(self.m.dqhdt))
+            elif feature.endswith('1'):
+                self.ds[feature] = self[feature[:-1]].isel(lev=0)
+            elif feature.endswith('2'):
+                self.ds[feature] = self[feature[:-1]].isel(lev=1)
             else:
                 raise ValueError(f"could not interpret {feature}")
 
@@ -163,11 +177,17 @@ class Dataset(object):
 
     def spec_var(self, arr):
         """Convert a spectral array to an xarray.DataArray"""
-        return self.spec_0 + arr
+        if len(arr.shape) == len(self.spec_0.shape):
+            return self.spec_0 + arr
+        elif len(arr.shape) == len(self.spec_0.shape)-1:
+            return self.spec_0.isel(lev=0) + arr
 
     def real_var(self, arr):
         """Convert a real array to an xarray.DataArray"""
-        return self.real_0 + arr
+        if len(arr.shape) == len(self.real_0.shape):
+            return self.real_0 + arr
+        elif len(arr.shape) == len(self.real_0.shape)-1:
+            return self.real_0.isel(lev=0) + arr
 
     def fft(self, x):
         """Convert real -> spectral"""
