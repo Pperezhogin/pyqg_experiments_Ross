@@ -506,11 +506,11 @@ class figure_grid():
 
     next = next_subplot
 
-def kdeplot(data_, ax=None, **kw):
+def kdeplot(data_, ax=None, lim=7.5, **kw):
     if ax is None: ax = plt.gca()
     data = np.array(data_).ravel()
     kde = gaussian_kde(data)
-    lo, hi = np.percentile(data, [7.5, 92.5])
+    lo, hi = np.percentile(data, [lim, 100-lim])
     diff = (hi-lo)
     lims = np.linspace(lo - diff*0.1, hi + diff*0.1, 200)
     ax.plot(lims, kde(lims), **kw)
@@ -646,7 +646,7 @@ def compare_simulations(*datasets, directory=None, new_fontsize=16, title_suffix
 
     plt.rcParams.update({ 'font.size': orig_fontsize })
 
-def plot_spectra(key, datasets, ax=None, z=None, loglog=True, leg=True, xlim=None, kmin=5e-5, kmax=1.5e-4, fontsize=16, legend_fontsize=16, **kw):
+def plot_spectra(key, datasets, ax=None, z=None, loglog=True, leg=True, xlim=None, kmin=5e-5, kmax=1.5e-4, fontsize=16, legend_fontsize=16, plot_fits=True, **kw):
     if ax is None: ax = plt.gca()
         
     maxes = []
@@ -668,7 +668,9 @@ def plot_spectra(key, datasets, ax=None, z=None, loglog=True, leg=True, xlim=Non
             plot_fn = ax.semilogx
 
         kwargs = dict(ds.attrs.get('plot_kwargs', {}))
-        kwargs['label'] = ds.label
+        kwargs =dict(kwargs)
+        if 'label' not in kwargs:
+            kwargs['label'] = ds.label
 
         i = np.argmin(np.abs(np.log(k) - np.log(kmin)))
         j = np.argmin(np.abs(np.log(k) - np.log(kmax)))
@@ -679,8 +681,8 @@ def plot_spectra(key, datasets, ax=None, z=None, loglog=True, leg=True, xlim=Non
 
         line = plot_fn(k,q,lw=3,**kwargs,zorder=10)
 
-        if loglog:
-            plot_fn(k[i-1:j+1], np.exp(np.log(k[i-1:j+1]) * lr.slope + lr.intercept)*1.2, color=line[0]._color, ls='--', alpha=0.5)
+        if loglog and plot_fits:
+            plot_fn(k[i-1:j+1], np.exp(np.log(k[i-1:j+1]) * lr.slope + lr.intercept)*1.2, color=line[0]._color, ls=':', alpha=0.5)
 
         maxes.append(q.max())
 
@@ -701,12 +703,12 @@ def plot_spectra(key, datasets, ax=None, z=None, loglog=True, leg=True, xlim=Non
     ylabel = key
         
     if key in ['KEspec']:
-        ylabel = "KE spectrum ($m^{2} s^{-2}$)"
+        ylabel = "KE spectrum [$m^{2} s^{-2}$]"
     if key in ['Ensspec','entspec']:
-        ylabel = "Enstrophy spectrum ($s^{-2}$)"
+        ylabel = "Enstrophy spectrum [$s^{-2}$]"
     if key in ['APEflux','KEflux','APEgenspec','Dissipation']:
         units = "$m^{2} s^{-3}$"
-        ylabel = f"{prefix}Normalized {key.replace('flux', ' flux').replace('genspec', ' generation')} ({units})"
+        ylabel = f"{prefix}Normalized {key.replace('flux', ' flux').replace('genspec', ' generation')} [{units}]"
         
     ax.set_ylabel(prefix+ylabel, fontsize=fontsize)
-    ax.set_xlabel("Radial wavenumber $k$ ($m^{-1}$)", fontsize=fontsize)
+    ax.set_xlabel("Radial wavenumber $k$ [$m^{-1}$]", fontsize=fontsize)
