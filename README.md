@@ -38,7 +38,7 @@ forcing_eddy_train.ddx('u')
 forcing_eddy_train.ddy('u')
 
 # Arbitrary DSL for extracting features (useful for symbolic regression)
-forcing_eddy_train.extract_feature('ddx_u_times_q_plus_ddy_v_times_q')
+forcing_eddy_train.extract_feature('add(mul(ddx(u), q), mul(ddy(v), q))')
 
 # Initialize a parameterization
 param = pse.ZB2020Parameterization()
