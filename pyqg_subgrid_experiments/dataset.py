@@ -82,6 +82,9 @@ class Dataset(object):
 
     def isel(self, *args, **kwargs):
         return self.__class__(self.ds.isel(*args, **kwargs))
+    
+    def expand_dims(self, *args, **kwargs):
+        return self.__class__(self.ds.expand_dims(*args, **kwargs))
 
     def assign_attrs(self, **kw):
         self.ds = self.ds.assign_attrs(**kw)
@@ -133,6 +136,8 @@ class Dataset(object):
                     self.ds[feature] = getattr(operator, op)(*extract_pair(inner))
                 elif op in ['neg', 'abs']:
                     self.ds[feature] = getattr(operator, op)(self.extract_feature(inner))
+                elif op in ['div', 'curl']:
+                    self.ds[feature] = getattr(self, op)(*extract_pair(inner))
                 elif op in ['ddx', 'ddy']:
                     self.ds[feature] = getattr(self, op)(self.extract_feature(inner))
                 else:
@@ -146,6 +151,10 @@ class Dataset(object):
                 self.ds[feature] = self[feature[:-1]].isel(lev=0)
             elif feature.endswith('2'):
                 self.ds[feature] = self[feature[:-1]].isel(lev=1)
+            elif feature.startswith('ddx_'):
+                self.ds[feature] = self.ddx(self.extract_feature(feature[4:]))
+            elif feature.startswith('ddy_'):
+                self.ds[feature] = self.ddy(self.extract_feature(feature[4:]))
             else:
                 raise ValueError(f"could not interpret {feature}")
 
@@ -251,6 +260,10 @@ class Dataset(object):
     @cachedproperty
     def enstrophy(self):
         return self.vorticity**2
+    
+    @property
+    def en(self):
+        return self.enstrophy
 
     @cachedproperty
     def relative_vorticity(self):
@@ -352,10 +365,20 @@ class Dataset(object):
         for key, val in budget.items():
             normalized[key] = val / self.m.M**2
         return k, normalized
+    
+    @property
+    def twothirds_nyquist_frequency_index(self):
+        return np.argwhere(np.array(self.m.filtr)[0]<1)[0,0]
+    
+    @property
+    def twothirds_nyquist_frequency(self):
+        return self.k.data[self.twothirds_nyquist_frequency_index]
 
-    def spectral_linregress(self, key, kmin=5e-5, kmax=1.5e-4, **kw):
+    def spectral_linregress(self, key, kmin=5e-5, kmax=None, **kw):
         """Run linear regression in log-log space for the spectrum given by
         `key` over a frequency range of `kmin` to `kmax`"""
+        if kmax is None:
+            kmax = self.twothirds_nyquist_frequency
         k, spectrum = self.isotropic_spectrum(key, **kw)
         i = np.argmin(np.abs(np.log(k) - np.log(kmin)))
         j = np.argmin(np.abs(np.log(k) - np.log(kmax)))
@@ -374,6 +397,18 @@ class Dataset(object):
     @property
     def layers(self):
         return range(len(self.lev))
+    
+    def decorrelation_timescale(self, other, **kw):
+        params1 = dict(self.pyqg_params)
+        params2 = dict(pse.Dataset.wrap(other).pyqg_params)
+        
+        m1 = pyqg.QGModel(**params1)
+        m1.set_q1q2(*self.final_q)
+        m1._invert()
+        
+        m2 = pyqg.QGModel(**params2)
+        
+        return time_until_uncorrelated(m1, m2, **kw)
 
     def distributional_distances(self, other):
         other = self.__class__.wrap(other)
@@ -381,44 +416,39 @@ class Dataset(object):
         datasets = [self, other]
 
         for z in self.layers:
-            for quantity in ['q','u','v','ke','enstrophy','vorticity']:
+            for quantity in ['q','u','v','ke','en']:
                 distributions = [ds[quantity].isel(lev=z, time=-1).data.ravel() for ds in datasets]
                 distance = wasserstein_distance(*distributions)
                 distances[f"{quantity}{z+1}_wasserstein_distance"] = distance
+                
+        kmax = min(
+            self.twothirds_nyquist_frequency,
+            other.twothirds_nyquist_frequency
+        )
 
-        def spectral_difference(k, spec1, spec2, kmax=1.5e-4):
+        def spectral_difference(k, spec1, spec2):
             j = np.argmin(np.abs(np.log(k) - np.log(kmax)))
-            return np.mean((spec1[:j] - spec2[:j])**2)
+            return np.sqrt(np.mean((spec1[:j] - spec2[:j])**2))
 
-        def spectral_linregress(k, spectrum, kmin=5e-5, kmax=1.5e-4):
+        def spectral_linregress(k, spectrum, kmin=5e-5):
             i = np.argmin(np.abs(np.log(k) - np.log(kmin)))
             j = np.argmin(np.abs(np.log(k) - np.log(kmax)))
             lr = linregress(np.log(k[i:j]), np.log(spectrum[i:j]))
             return lr
+        
+        for varname in ['KEspec', 'Ensspec']:
+            for z in self.layers:
+                k1, spec1 = self.isotropic_spectrum(varname, z=z) 
+                k2, spec2 = other.isotropic_spectrum(varname, z=z)
+                distances[f"{varname}{z+1}_curve_rmse"] = spectral_difference(k1, spec1, spec2)
+                lr1 = spectral_linregress(k1, spec1)
+                lr2 = spectral_linregress(k2, spec2)
+                distances[f"{varname}{z+1}_slope_diff"] = lr1.slope - lr2.slope
 
-        for varname in self.spectral_diagnostics:
-            var = self[varname]
-            if 'lev' in var.dims:
-                for z in self.layers:
-                    k1, spec1 = self.isotropic_spectrum(varname, z=z) 
-                    k2, spec2 = other.isotropic_spectrum(varname, z=z)
-                    distances[f"{varname}{z+1}_mean_difference"] = spectral_difference(k1, spec1, spec2)
-
-                    if self[varname].min() >= 0 and other[varname].min() >= 0:
-                        lr1 = spectral_linregress(k1, spec1)
-                        lr2 = spectral_linregress(k2, spec2)
-                        distances[f"{varname}{z+1}_loglog_slope_difference"] = lr1.slope - lr2.slope
-                        distances[f"{varname}{z+1}_loglog_inter_difference"] = lr1.intercept - lr2.intercept
-            else:
-                k1, spec1 = self.isotropic_spectrum(varname) 
-                k2, spec2 = other.isotropic_spectrum(varname)
-                distances[f"{varname}_mean_difference"] = spectral_difference(k1, spec1, spec2)
-
-                if self[varname].min() >= 0 and other[varname].min() >= 0:
-                    lr1 = spectral_linregress(k1, spec1)
-                    lr2 = spectral_linregress(k2, spec2)
-                    distances[f"{varname}_loglog_slope_difference"] = lr1.slope - lr2.slope
-                    distances[f"{varname}_loglog_inter_difference"] = lr1.intercept - lr2.intercept
+        for varname in ['APEgenspec', 'APEflux', 'KEflux', 'Dissipation']:
+            k1, spec1 = self.isotropic_spectrum(varname) 
+            k2, spec2 = other.isotropic_spectrum(varname)
+            distances[f"{varname}_curve_rmse"] = spectral_difference(k1, spec1/self.m.M**2, spec2/other.m.M**2)
 
         return distances
     

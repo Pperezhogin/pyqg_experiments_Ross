@@ -94,75 +94,8 @@ def initialize_pyqg_model(**kwargs):
     pyqg_kwargs.update(**kwargs)
     return pyqg.QGModel(**pyqg_kwargs)
 
-def initialize_cnn_parameterized_model(cnn0, cnn1, **kwargs):
-    import torch
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    cnn0.to(device)
-    cnn1.to(device)
-    
-    def eval_models(m):
-        x0 = cnn0.extract_inputs_from_qgmodel(m)
-        if cnn0.inputs == cnn1.inputs:
-            x1 = x0
-        else:
-            x1 = cnn1.extract_inputs_from_qgmodel(m)
-
-        y0 = cnn0.predict(x0, device=device)[0]
-        y1 = cnn1.predict(x1, device=device)[0]
-        return y0, y1
-
-    if cnn0.targets == [('u_forcing_advection', 0), ('v_forcing_advection', 0)]:
-        def uv_parameterization(m):
-            y0, y1 = eval_models(m)
-            du = np.array([y0[0], y1[0]]).astype(m.q.dtype)
-            dv = np.array([y0[1], y1[1]]).astype(m.q.dtype)
-            return du, dv
-        kwargs['uv_parameterization'] = uv_parameterization
-    else:
-        def q_parameterization(m):
-            y0, y1 = eval_models(m)
-            dq = np.array([y0[0], y1[0]]).astype(m.q.dtype)
-            return dq
-        kwargs['q_parameterization'] = q_parameterization
-
-    return initialize_pyqg_model(**kwargs)
-
-def generate_ag7531_parameterized_dataset(factor=1.0, **kwargs):
-    import torch
-    import sys
-    sys.path.append('/scratch/zanna/code/ag7531')
-    sys.path.append('/scratch/zanna/code/ag7531/pyqgparamexperiments')
-    from subgrid.models.utils import load_model_cls
-    from subgrid.models.transforms import SoftPlusTransform
-    from parameterization import Parameterization
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    model_cls = load_model_cls('subgrid.models.models1', 'FullyCNN')
-    net = model_cls(2, 4)
-    net.final_transformation = SoftPlusTransform()
-    net.final_transformation.indices = [1,3]
-    net.load_state_dict(
-        torch.load('/scratch/zanna/data/pyqg/models/ag7531/1/dc74cea68a7f4c7e98f9228649a97135/artifacts/models/trained_model.pth'),
-    )
-    net.to(device)
-    param = Parameterization(net, device)
-    def uv_parameterization(m):
-        du, dv = param(m.ufull, m.vfull, m.t)
-        return du*factor, dv*factor
-    return generate_dataset(uv_parameterization=uv_parameterization, **kwargs)
-
-def generate_zb2020_parameterized_dataset(factor_upper=-62261027.5, factor_lower=-54970158.2, **kwargs):
-    factor = np.array([factor_upper, factor_lower])[:,np.newaxis,np.newaxis]
-    def uv_parameterization(m):
-        du, dv = Dataset(m).isel(time=-1).zb2020_parameterization
-        return du*factor, dv*factor
-    return generate_dataset(uv_parameterization=uv_parameterization, **kwargs)
-
 def generate_dataset(sampling_freq=1000, sampling_dist='uniform', **kwargs):
     m = initialize_pyqg_model(**kwargs)
-    return run_simulation(m, sampling_freq=sampling_freq, sampling_dist=sampling_dist)
-
-def generate_cnn_parameterized_dataset(cnn0, cnn1, sampling_freq=1000, sampling_dist='uniform', **kwargs):
-    m = initialize_cnn_parameterized_model(cnn0, cnn1, **kwargs)
     return run_simulation(m, sampling_freq=sampling_freq, sampling_dist=sampling_dist)
 
 def generate_forcing_dataset(hires=256, lores=64, sampling_freq=1000, sampling_dist='uniform', filtr=None, **pyqg_params):
@@ -365,9 +298,10 @@ if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--save_to', type=str)
-    parser.add_argument('--zb2020', type=int, default=0)
-    parser.add_argument('--ag7531', type=int, default=0)
     parser.add_argument('--control', type=int, default=0)
+    parser.add_argument('--zb2020', type=float, default=0)
+    parser.add_argument('--ag7531', type=float, default=0)
+    parser.add_argument('--cnn_param', type=str, default='')
     parser.add_argument('--transfer_test', type=int, default=0)
     args, extra = parser.parse_known_args()
 
@@ -381,12 +315,14 @@ if __name__ == '__main__':
 
     os.system(f"mkdir -p {os.path.dirname(os.path.realpath(args.save_to))}")
 
-    if args.zb2020:
-        ds = generate_zb2020_parameterized_dataset(**kwargs)
-    elif args.ag7531:
-        ds = generate_ag7531_parameterized_dataset(**kwargs)
-    elif args.control:
+    if args.control:
         ds = generate_dataset(**kwargs)
+    elif args.zb2020:
+        ds = pse.ZB2020Parameterization(factor_mult=args.zb2020).run_online(**kwargs)
+    elif args.ag7531:
+        ds = pse.AG7531Parameterization(factor=args.ag7531).run_online(**kwargs)
+    elif args.cnn_param:
+        ds = pse.CNNParameterization(args.cnn_param).run_online(**kwargs)
     else:
         ds = generate_forcing_dataset(**kwargs)
 

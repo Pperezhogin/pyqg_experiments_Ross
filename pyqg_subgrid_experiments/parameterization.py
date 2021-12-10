@@ -1,4 +1,5 @@
 import os
+import sys
 import glob
 import json
 import numpy as np
@@ -71,23 +72,6 @@ class Parameterization(object):
         params[self.parameterization_type] = self
         params['nx'] = self.nx
         return generate_dataset(**params)
-    
-    def decorrelation_timescale(self, dataset, **kw):
-        ds = pse.Dataset.wrap(dataset)
-        params1 = dict(ds.pyqg_params)
-        
-        params2 = dict(params1)
-        params2[self.parameterization_type] = self
-        params2['nx'] = self.nx
-        params2['ny'] = self.nx
-        
-        m1 = pyqg.QGModel(**params1)
-        m1.set_q1q2(*ds.final_q)
-        m1._invert()
-        
-        m2 = pyqg.QGModel(**params2)
-        
-        return time_until_uncorrelated(m1, m2, **kw)
     
     def test_online(self, dataset, n_simulations=5, online_dir=None, **kw):
         if online_dir is not None:
@@ -166,9 +150,27 @@ class Parameterization(object):
             ) / len(self.targets)
             
         if offline_path is not None:
+            os.system(f"mkdir -p {os.path.dirname(offline_path)}")
             test.to_netcdf(offline_path)
 
         return test
+    
+    def decorrelation_timescale(self, dataset, **kw):
+        ds = pse.Dataset.wrap(dataset)
+        params1 = dict(ds.pyqg_params)
+        
+        params2 = dict(params1)
+        params2[self.parameterization_type] = self
+        params2['nx'] = self.nx
+        params2['ny'] = self.nx
+        
+        m1 = pyqg.QGModel(**params1)
+        m1.set_q1q2(*ds.final_q)
+        m1._invert()
+        
+        m2 = pyqg.QGModel(**params2)
+        
+        return time_until_uncorrelated(m1, m2, **kw)
 
 class ZB2020Parameterization(Parameterization):
     def __init__(self, factor=-46761284, factor_mult=1.0):
@@ -209,6 +211,39 @@ class ZB2020Parameterization(Parameterization):
             Su = Su.data * self.factor
             Sv = Sv.data * self.factor
         return dict(u_forcing_advection=Su, v_forcing_advection=Sv)
+
+class AG7531Parameterization(Parameterization):
+    def __init__(self, factor=1.0):
+        agpath = '/scratch/zanna/code/ag7531'
+        mpath = '/scratch/zanna/data/pyqg/models/ag7531/1/dc74cea68a7f4c7e98f9228649a97135'
+        if not os.path.exists(agpath):
+            raise ValueError("This method can currently only be run on NYU HPC")
+        if not os.path.exists(mpath):
+            raise ValueError(f"This method expects a trained model file at {mpath}")
+        sys.path.append(agpath)
+        sys.path.append(f"{agpath}/pyqgparamexperiments")
+        import torch
+        from subgrid.models.utils import load_model_cls
+        from subgrid.models.transforms import SoftPlusTransform
+        from parameterization import Parameterization as AGParam
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        model_cls = load_model_cls('subgrid.models.models1', 'FullyCNN')
+        net = model_cls(2, 4)
+        net.final_transformation = SoftPlusTransform()
+        net.final_transformation.indices = [1,3]
+        net.load_state_dict(torch.load(f"{mpath}/artifacts/models/trained_model.pth"),)
+        net.to(device)
+        self.param = AGParam(net, device)
+        self.factor = factor
+        
+    @property
+    def targets(self):
+        return ['u_forcing_advection', 'v_forcing_advection']
+    
+    def predict(self, m):
+        factor = self.factor
+        du, dv = self.param(m.ufull, m.vfull, m.t)
+        return du*factor, dv*factor
 
 class CNNParameterization(Parameterization):
     def __init__(self, directory, models=None, model_class=FullyCNN):
