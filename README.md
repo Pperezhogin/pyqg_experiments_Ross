@@ -84,6 +84,50 @@ pse.plot_helpers.compare_simulations(
 
 See [here](./examples) for more examples.
 
+### Defining your own parameterizations
+
+You can either mimic [this example in the pyqg documentation](https://pyqg.readthedocs.io/en/latest/examples/parameterization.html), or you can use the helpers in this library as follows:
+
+```python
+import pyqg_subgrid_experiments as pse
+
+# Define a parameterization that predicts the subgrid forcing of potential vorticity
+class QParameterization(pse.Parameterization):
+    @property
+    def targets(self):
+        return ['q_forcing_advection']
+        
+    def predict(self, m):           
+        dq = some_computation_involving(m)
+        return dict(q_forcing_advection=dq)
+        
+# Define a parameterization that predicts the subgrid forcing of velocity
+class UVParameterization(pse.Parameterization):
+    @property
+    def targets(self):
+        return ['u_forcing_advection', 'v_forcing_advection']
+        
+    def predict(self, m):           
+        du, dv = some_computation_involving(m)
+        return dict(u_forcing_advection=du, v_forcing_advection=dv)
+        
+# Define a parameterization that predicts the subgrid forcing of PV, but as fluxes
+class QFluxParameterization(pse.Parameterization):
+    @property
+    def targets(self):
+        return ['uq_subgrid_flux', 'vq_subgrid_flux']
+        
+    def predict(self, m):           
+        uq_flux, vq_flux = some_computation_involving(m)
+        return dict(uq_subgrid_flux=uq_flux, vq_subgrid_flux=vq_flux)
+        
+param = QParameterization() # or another
+arbitrary_simulation = param.run_online(**pyqg_params)
+
+dataset = pse.Dataset('/path/to/dataset')
+simulation_like_dataset = param.run_online(**dataset.pyqg_params)
+```
+
 ## More Details
 
 More detailed documentation is coming soon, but for now, see [this Overleaf](https://www.overleaf.com/read/jcfbxczmnptb) for work-in-progress definitions of the dataset generation process, included fields, and both offline and online metrics.
