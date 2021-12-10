@@ -243,7 +243,7 @@ class AG7531Parameterization(Parameterization):
     def predict(self, m):
         factor = self.factor
         du, dv = self.param(m.ufull, m.vfull, m.t)
-        return du*factor, dv*factor
+        return dict(u_forcing_advection=du*factor, v_forcing_advection=dv*factor)
 
 class CNNParameterization(Parameterization):
     def __init__(self, directory, models=None, model_class=FullyCNN):
