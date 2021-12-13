@@ -13,6 +13,8 @@ from pyqg.particles import GriddedLagrangianParticleArray2D
 from numpy import pi
 from scipy.stats import gaussian_kde, wasserstein_distance
 from collections import defaultdict, OrderedDict
+from matplotlib.patches import Patch
+from matplotlib.lines import Line2D
 
 import pyqg_subgrid_experiments as pse
 
@@ -533,57 +535,22 @@ def compare_simulations(*datasets, directory=None, new_fontsize=16, title_suffix
             plot_kwargs['label'] = ds.attrs.get('label', f"Simulation {i+1}")
             ds = ds.assign_attrs(plot_kwargs=plot_kwargs)
 
-    def label_for(ds):
-        return ds.attrs['plot_kwargs']['label']
-
     def filename_for(plot):
         if directory is None:
             return None
         else:
             return os.path.join(directory, f"{plot}.png")
 
-    quantities = ['q','u','v','ke','enstrophy']
+    quantities = ['q','u','ke','enstrophy']
 
     layers = range(len(ds1.lev))
-
-    def imshow(x_):
-        x = np.array(x_)
-        vmax = np.percentile(np.abs(x).ravel(), 99)*1.01
-        if x.min() < 0:
-            cmap = 'bwr'
-            vmin = -vmax
-        else:
-            cmap = 'inferno'
-            vmin = 0
-        plt.imshow(x, cmap=cmap, vmin=vmin, vmax=vmax)
-        plt.xticks([])
-        plt.yticks([])
-        plt.colorbar()
     
     if show_quantities:
-        with figure_grid(rows=len(layers)*len(datasets), cols=len(quantities), filename=filename_for("quantity_final_values")) as g:
-            g.title(f"Final values of quantities{title_suffix}")
-            for z in layers:
-                for ds in datasets:
-                    for quantity in quantities:
-                        g.next()
-                        if g.row == 0: plt.title(quantity)
-                        if g.col == 0: plt.ylabel(f"{label_for(ds)}, z={z}", rotation=0, ha='right', va='center')
-                        imshow(ds[quantity].isel(lev=z, time=-1, run=-1).data)
-
-        with figure_grid(rows=len(layers)*len(datasets), cols=len(quantities), filename=filename_for("quantity_time_averaged_values")) as g:
-            g.title(f"Quantities time-averaged over last half of simulation{title_suffix}")
-            for z in layers:
-                for ds in datasets:
-                    T = len(ds.time)//2
-                    for quantity in quantities:
-                        g.next()
-                        if g.row == 0: plt.title(quantity)
-                        if g.col == 0: plt.ylabel(f"{label_for(ds)}, z={z}", rotation=0, ha='right', va='center')
-                        imshow(ds[quantity].isel(lev=z, time=slice(-T, None), run=-1).mean(dim='time').data)
+        compare_quantities(datasets, filename=filename_for("quantity_final_values"), title_suffix=title_suffix)
+        compare_quantities(datasets, filename=filename_for("quantity_time_averages"), title_suffix=title_suffix, time_average=True)
                         
     if show_timeseries:
-        with figure_grid(rows=len(quantities), cols=len(layers), filename=filename_for("quantities_over_time"), rowwidth=12, rowheight=4) as g:
+        with figure_grid(rows=len(quantities)//2+len(quantities)%2, cols=len(layers)*2, filename=filename_for("quantities_over_time"), rowwidth=18, rowheight=4) as g:
             g.title(f"Temporal evolution of quantities, averaged over space/run{title_suffix}")
             for quantity in quantities:
                 for z in layers:
@@ -594,59 +561,112 @@ def compare_simulations(*datasets, directory=None, new_fontsize=16, title_suffix
                             time = (time.data / np.timedelta64(1, 's')).astype(int)
                         y = ds[quantity].isel(lev=z).mean(dim=['y','x','run']).data
                         yerr = ds[quantity].isel(lev=z).std(dim=['y','x','run']).data
-                        plt.plot(time, y, label=label_for(ds))
+                        plt.plot(time, y, label=ds.label)
                         plt.fill_between(time, y-yerr, y+yerr, alpha=0.1)
 
                     plt.legend()
 
     if show_distributions:
-        with figure_grid(rows=len(quantities), cols=len(layers), filename=filename_for("quantity_distributions"), rowwidth=12, rowheight=4) as g:
-            g.title(f"Final distributions of quantities{title_suffix}")
-            for quantity in quantities:
-                for z in layers:
-                    g.next(title=f"{quantity}, z={z}")
-                    distributions = [ds[quantity].isel(lev=z, time=-1).data.ravel() for ds in datasets]
-                    for ds, dist in zip(datasets, distributions):
-                        kdeplot(dist, **ds.attrs['plot_kwargs'])
-                    plt.legend(loc='best')
-
-    n_spectra = 0
-    for k in ds1.spectral_diagnostics:
-        v = ds1[k]
-        if 'l' in v.dims and 'k' in v.dims:
-            if 'lev' in v.dims:
-                n_spectra += len(layers)
-            else:
-                n_spectra += 1
+        compare_distributions(datasets, filename=filename_for("quantity_distributions"), title_suffix=title_suffix)
 
     if show_spectra:
-        with figure_grid(cols=2, total=n_spectra, rowwidth=20, rowheight=6, filename=filename_for("spectra")) as g:
+        with figure_grid(rows=2, cols=len(layers), rowwidth=20, rowheight=6, filename=filename_for("spectra")) as g:
             g.title(f"Spectral comparisons{title_suffix}")
-            for k in ds1.spectral_diagnostics:
-                v = ds1[k]
-                if 'lev' in v.dims:
-                    for z in layers:
-                        g.next(title=f"{k}, z={z}\n({ds1[k].attrs['long_name']})")
-                        plot_spectra(k, datasets, z=z)
+            for key in ['KEspec', 'Ensspec']:
+                for z in layers:
+                    g.next(title=f"{key}, z={z}\n({ds1[key].attrs['long_name']})")
+                    compare_spectra(datasets, key, z=z)
 
-                else:
-                    g.next(title=f"{k}, barotropic\n({ds1[k].attrs['long_name']})")
-                    plot_spectra(k, datasets)
-                    
     if show_budgets:
-        with figure_grid(rows=len(datasets), cols=1, rowwidth=16, rowheight=8, filename=filename_for("energy_budgets")) as g:
-            g.title(f"Spectral energy budgets{title_suffix}")
-            for ds in datasets:
-                g.next()
-                k, budget = ds.energy_budget
-                for key, val in budget.items():
-                    plt.semilogx(k, val, label=key)
-                plt.legend(loc='best')
-                plt.title(label_for(ds))
+        compare_budgets(datasets, filename=filename_for("energy_budgets"), title_suffix=title_suffix)
 
     plt.rcParams.update({ 'font.size': orig_fontsize })
+    
+def compare_quantities(datasets, quantities=['q','u','ke','enstrophy'], time_average=False, filename=None, title_suffix=''):
+    def imshow(x, vmin=None, vmax=None, cb=True):
+        plt.imshow(x, cmap=('inferno' if vmin == 0 else 'bwr'), vmin=vmin, vmax=vmax)
+        plt.xticks([])
+        plt.yticks([])
+        if cb:
+            cb = plt.colorbar()
+            cb.ax.yaxis.set_offset_position('left')
+            
+    layers = range(len(datasets[0].lev))
+    
+    if time_average:
+        extract = lambda ds, q, z: ds[q].isel(lev=z, run=-1, time=slice(-len(ds.time)//2, None)).mean(dim='time').data
+    else:
+        extract = lambda ds, q, z: ds[q].isel(lev=z, run=-1, time=-1).data
+    
+    with figure_grid(rows=len(quantities), cols=len(datasets)*len(layers), filename=filename) as g:
+        if time_average:
+            g.title(f"Time-averaged quantities{title_suffix}")
+        else:
+            g.title(f"Final values of quantities{title_suffix}")
+        for quantity in quantities:
+            for z in layers:
+                vmax = 0
+                vmin = 0
+                for ds in datasets:
+                    x = extract(ds, quantity, z)
+                    vmax = max(vmax, np.percentile(x, 99))
+                    vmin = min(vmin, np.percentile(x, 1))
+                if vmin < 0:
+                    vmax = max(vmax, -vmin) * 1.01
+                    vmin = -vmax
 
-def plot_spectra(key, datasets, ax=None, z=None, loglog=True, leg=True, xlim=None, kmin=5e-5, kmax=1.5e-4, fontsize=16, legend_fontsize=16, plot_fits=True, **kw):
+                for ds in datasets:
+                    g.next()
+                    if g.row == 0: plt.title(ds.label)
+                    if g.col == 0: plt.ylabel(f"{quantity}, z={z}", rotation=0, ha='right', va='center', fontweight='bold')
+                    if g.col == len(datasets): plt.ylabel(f"z={z}", rotation=0, ha='right', va='center', fontweight='bold')
+                    imshow(extract(ds, quantity, z), vmin=vmin, vmax=vmax, cb=((g.col+1) % len(datasets) == 0))
+                    
+def compare_distributions(datasets, quantities=['q','u','ke','enstrophy'], filename=None, title_suffix=''):
+    layers = range(len(datasets[0].lev))
+    with figure_grid(rows=len(quantities)//2 + len(quantities)%2, cols=len(layers)*2, filename=filename, rowwidth=18, rowheight=4) as g:
+        g.title(f"Final distributions of quantities{title_suffix}")
+        for quantity in quantities:
+            for z in layers:
+                g.next(title=f"{quantity}, z={z}")
+                distributions = [ds[quantity].isel(lev=z, time=-1).data.ravel() for ds in datasets]
+                for ds, dist in zip(datasets, distributions):
+                    kdeplot(dist, **ds.attrs.get('plot_kwargs', {}))
+                plt.legend(loc='best')
+    
+def compare_budgets(datasets, filename=None, title_suffix=''):
+    with figure_grid(1, cols=1, rowwidth=16, rowheight=8, filename=filename) as g:
+        g.next()
+        plt.title(f"Spectral energy budgets{title_suffix}", fontsize=18)
+        
+        markers = list(Line2D.filled_markers)
+        styles = ['-','--','-.',':']
+        colors = OrderedDict()
+        
+        kws = [dict(ls=styles[i%len(styles)], marker=markers[i%len(markers)],
+                    markersize=12, markeredgecolor='white')
+              for i in range(len(datasets))]
+
+        for i, ds in enumerate(datasets):
+            k, budget = ds.normalized_energy_budget
+            plt.axvline(ds.twothirds_nyquist_frequency, color='gray', alpha=0.5, **kws[i])
+            plt.axvline(1/ds.m.rd, color='pink', alpha=0.5, **kws[i])
+            for key, val in budget.items():
+                if key in colors:
+                    plt.semilogx(k, val, color=colors[key], **kws[i])
+                else:
+                    colors[key] = plt.semilogx(k, val, **kws[i])[0]._color
+        
+        plt.legend(handles=[
+            Patch(facecolor=color, label=key) for key, color in colors.items()
+        ] + [
+            Patch(facecolor='pink', label='Deformation frequency', alpha=0.5),
+            Patch(facecolor='gray', label='65% Nyquist frequency', alpha=0.5),
+        ] + [
+            Line2D([0], [0], color='black', label=ds.label, **kw) for kw, ds in zip(kws, datasets)
+        ], fontsize=18, loc='upper right')
+
+def compare_spectra(datasets, key='KEspec', z='sum', ax=None, loglog=True, leg=True, xlim=None, kmin=5e-5, kmax=1.5e-4, fontsize=16, legend_fontsize=16, plot_fits=True, **kw):
     if ax is None: ax = plt.gca()
         
     maxes = []
