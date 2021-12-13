@@ -225,7 +225,7 @@ class AG7531Parameterization(Parameterization):
         import torch
         from subgrid.models.utils import load_model_cls
         from subgrid.models.transforms import SoftPlusTransform
-        from parameterization import Parameterization as AGParam
+        import pyqgparamexperiments.parameterization
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         model_cls = load_model_cls('subgrid.models.models1', 'FullyCNN')
         net = model_cls(2, 4)
@@ -233,7 +233,7 @@ class AG7531Parameterization(Parameterization):
         net.final_transformation.indices = [1,3]
         net.load_state_dict(torch.load(f"{mpath}/artifacts/models/trained_model.pth"),)
         net.to(device)
-        self.param = AGParam(net, device)
+        self.param = pyqgparamexperiments.parameterization.Parameterization(net, device)
         self.factor = factor
         
     @property
