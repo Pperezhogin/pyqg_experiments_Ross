@@ -519,6 +519,45 @@ def kdeplot(data_, ax=None, lim=7.5, **kw):
     ax.set_yticks([])
     ax.set_ylabel('Density')
 
+class PlotOptions():
+    def __init__(self, datasets, markers=True):
+        if markers:
+            markers = list(Line2D.filled_markers)
+        else:
+            markers = [None]
+        styles = ['-','--','-.',':']
+        kws = [dict(ls=styles[i%len(styles)],
+                    marker=markers[i%len(markers)],
+                    markersize=12, markeredgecolor='white')
+              for i in range(len(datasets))]
+        self.kws = kws
+        self.labels = [ds.label for ds in datasets]
+        
+    def __getitem__(self, k):
+        if k in self.labels:
+            k = self.labels.index(k)
+        return self.kws[k]
+
+def quantity_label(q):
+    if q == 'q':
+        return "Potential vorticity [$s^{-1}$]"
+    elif q == 'u':
+        return "x-velocity [$ms^{-1}$]"
+    elif q == 'v':
+        return "y-velocity [$ms^{-1}$]"
+    elif q == 'ke':
+        return 'KE density [$m^2s^{-2}$]'
+    elif q == 'enstrophy':
+        return 'Enstrophy [$m^2s^{-2}$]'
+    else:
+        return q
+
+def quantity_title(q):
+    return quantity_label(q).split(' [')[0]
+
+def quantity_units(q):
+    return '['+quantity_label(q).split(' [')[1]
+
 def compare_simulations(*datasets, directory=None, new_fontsize=16, title_suffix='', show_quantities=True, show_timeseries=True, show_distributions=True, show_spectra=True, show_budgets=True):
     if directory is not None:
         os.system(f"mkdir -p {directory}")
@@ -550,32 +589,33 @@ def compare_simulations(*datasets, directory=None, new_fontsize=16, title_suffix
         compare_quantities(datasets, filename=filename_for("quantity_time_averages"), title_suffix=title_suffix, time_average=True)
                         
     if show_timeseries:
-        with figure_grid(rows=len(quantities)//2+len(quantities)%2, cols=len(layers)*2, filename=filename_for("quantities_over_time"), rowwidth=18, rowheight=4) as g:
+        kws = PlotOptions(datasets, markers=False)
+        with figure_grid(rows=1, cols=len(quantities), filename=filename_for("quantities_over_time"), rowwidth=24, rowheight=6) as g:
             g.title(f"Temporal evolution of quantities, averaged over space/run{title_suffix}")
             for quantity in quantities:
-                for z in layers:
-                    g.next(title=f"{quantity}, z={z}")
-                    for ds in datasets:
-                        time = ds.coords['time']
-                        if time.dtype == np.dtype('<m8[ns]'):
-                            time = (time.data / np.timedelta64(1, 's')).astype(int)
-                        y = ds[quantity].isel(lev=z).mean(dim=['y','x','run']).data
-                        yerr = ds[quantity].isel(lev=z).std(dim=['y','x','run']).data
-                        plt.plot(time, y, label=ds.label)
-                        plt.fill_between(time, y-yerr, y+yerr, alpha=0.1)
-
-                    plt.legend()
+                g.next(title=quantity_title(quantity))
+                for i,ds in enumerate(datasets):
+                    time = ds.coords['time']
+                    if time.dtype == np.dtype('<m8[ns]'):
+                        time = (time.data / np.timedelta64(1, 'D')).astype(int)
+                    y = ds[quantity].sum(dim='lev').mean(dim=['y','x','run']).data
+                    yerr = ds[quantity].sum(dim='lev').std(dim=['y','x','run']).data
+                    plt.plot(time, y, label=ds.label, lw=2, **kws[i])
+                    plt.fill_between(time, y-yerr, y+yerr, alpha=0.1)
+                    plt.xlabel("Model time [days]")
+                    plt.ylabel(quantity_label(quantity))
+                if g.col==0:
+                    plt.legend(fontsize=14)
 
     if show_distributions:
-        compare_distributions(datasets, filename=filename_for("quantity_distributions"), title_suffix=title_suffix)
+        compare_distributions(datasets, filename=filename_for("quantity_distributions"), z='sum', title_suffix=title_suffix)
 
     if show_spectra:
-        with figure_grid(rows=2, cols=len(layers), rowwidth=20, rowheight=6, filename=filename_for("spectra")) as g:
+        with figure_grid(rows=1, cols=2, rowwidth=24, rowheight=8, filename=filename_for("spectra")) as g:
             g.title(f"Spectral comparisons{title_suffix}")
             for key in ['KEspec', 'Ensspec']:
-                for z in layers:
-                    g.next(title=f"{key}, z={z}\n({ds1[key].attrs['long_name']})")
-                    compare_spectra(datasets, key, z=z)
+                g.next(title=ds1[key].attrs['long_name'])
+                compare_spectra(datasets, key, z='sum')
 
     if show_budgets:
         compare_budgets(datasets, filename=filename_for("energy_budgets"), title_suffix=title_suffix)
@@ -583,12 +623,12 @@ def compare_simulations(*datasets, directory=None, new_fontsize=16, title_suffix
     plt.rcParams.update({ 'font.size': orig_fontsize })
     
 def compare_quantities(datasets, quantities=['q','u','ke','enstrophy'], time_average=False, filename=None, title_suffix=''):
-    def imshow(x, vmin=None, vmax=None, cb=True):
+    def imshow(x, vmin=None, vmax=None, cb=True, cb_label=''):
         plt.imshow(x, cmap=('inferno' if vmin == 0 else 'bwr'), vmin=vmin, vmax=vmax)
         plt.xticks([])
         plt.yticks([])
         if cb:
-            cb = plt.colorbar()
+            cb = plt.colorbar(label=cb_label)
             cb.ax.yaxis.set_offset_position('left')
             
     layers = range(len(datasets[0].lev))
@@ -597,8 +637,8 @@ def compare_quantities(datasets, quantities=['q','u','ke','enstrophy'], time_ave
         extract = lambda ds, q, z: ds[q].isel(lev=z, run=-1, time=slice(-len(ds.time)//2, None)).mean(dim='time').data
     else:
         extract = lambda ds, q, z: ds[q].isel(lev=z, run=-1, time=-1).data
-    
-    with figure_grid(rows=len(quantities), cols=len(datasets)*len(layers), filename=filename) as g:
+    cols = len(datasets)*len(layers)
+    with figure_grid(rows=len(quantities), cols=cols, filename=filename, rowwidth=cols*4.5) as g:
         if time_average:
             g.title(f"Time-averaged quantities{title_suffix}")
         else:
@@ -618,34 +658,43 @@ def compare_quantities(datasets, quantities=['q','u','ke','enstrophy'], time_ave
                 for ds in datasets:
                     g.next()
                     if g.row == 0: plt.title(ds.label)
-                    if g.col == 0: plt.ylabel(f"{quantity}, z={z}", rotation=0, ha='right', va='center', fontweight='bold')
+                    if g.col == 0: plt.ylabel(f"{quantity_title(quantity)}, z={z}", rotation=0, ha='right', va='center', fontweight='bold')
                     if g.col == len(datasets): plt.ylabel(f"z={z}", rotation=0, ha='right', va='center', fontweight='bold')
-                    imshow(extract(ds, quantity, z), vmin=vmin, vmax=vmax, cb=((g.col+1) % len(datasets) == 0))
-                    
-def compare_distributions(datasets, quantities=['q','u','ke','enstrophy'], filename=None, title_suffix=''):
-    layers = range(len(datasets[0].lev))
-    with figure_grid(rows=len(quantities)//2 + len(quantities)%2, cols=len(layers)*2, filename=filename, rowwidth=18, rowheight=4) as g:
+                    imshow(extract(ds, quantity, z), vmin=vmin, vmax=vmax, cb=((g.col+1) % len(datasets) == 0), cb_label=quantity_units(quantity))
+                
+def compare_distributions(datasets, quantities=['q','u','ke','enstrophy'], z='sum', filename=None, title_suffix=''):
+    kws = PlotOptions(datasets,markers=False)
+    #layers = range(len(datasets[0].lev))
+    with figure_grid(rows=1, cols=len(quantities), filename=filename, rowwidth=24, rowheight=6) as g:
         g.title(f"Final distributions of quantities{title_suffix}")
         for quantity in quantities:
-            for z in layers:
-                g.next(title=f"{quantity}, z={z}")
-                distributions = [ds[quantity].isel(lev=z, time=-1).data.ravel() for ds in datasets]
-                for ds, dist in zip(datasets, distributions):
-                    kdeplot(dist, **ds.attrs.get('plot_kwargs', {}))
-                plt.legend(loc='best')
+            g.next(title=quantity_title(quantity))
+            if z == 'sum':
+                distributions = [ds[quantity].isel(time=-1).sum(dim='lev').data.ravel() for ds in datasets]
+            else:
+                distributions = [ds[quantity].isel(time=-1).isel(lev=z).data.ravel() for ds in datasets]
+                
+            for i, (ds, dist) in enumerate(zip(datasets, distributions)):
+                kw = dict(kws[i])
+                kw.update(ds.attrs.get('plot_kwargs', {}))
+                kdeplot(dist, lw=2, **kw)
+            if g.col==0:
+                plt.legend(loc='best', fontsize=14)
+                plt.ylabel("Probability Density")
+            else:
+                plt.ylabel("")
+            plt.xlabel(quantity_label(quantity))
+            plt.yscale('log')
     
 def compare_budgets(datasets, filename=None, title_suffix=''):
+    kws = PlotOptions(datasets)
+    
     with figure_grid(1, cols=1, rowwidth=16, rowheight=8, filename=filename) as g:
         g.next()
         plt.title(f"Spectral energy budgets{title_suffix}", fontsize=18)
-        
-        markers = list(Line2D.filled_markers)
-        styles = ['-','--','-.',':']
+        plt.grid(alpha=0.25)
+
         colors = OrderedDict()
-        
-        kws = [dict(ls=styles[i%len(styles)], marker=markers[i%len(markers)],
-                    markersize=12, markeredgecolor='white')
-              for i in range(len(datasets))]
 
         for i, ds in enumerate(datasets):
             k, budget = ds.normalized_energy_budget
@@ -665,6 +714,9 @@ def compare_budgets(datasets, filename=None, title_suffix=''):
         ] + [
             Line2D([0], [0], color='black', label=ds.label, **kw) for kw, ds in zip(kws, datasets)
         ], fontsize=18, loc='upper right')
+        
+        plt.xlabel("Radial wavenumber [$m^{-1}$]")
+        plt.ylabel("Energy density tendency [$m^2 s^{-3}$]")
 
 def compare_spectra(datasets, key='KEspec', z='sum', ax=None, loglog=True, leg=True, xlim=None, kmin=5e-5, kmax=1.5e-4, fontsize=16, legend_fontsize=16, plot_fits=True, **kw):
     if ax is None: ax = plt.gca()
@@ -675,8 +727,12 @@ def compare_spectra(datasets, key='KEspec', z='sum', ax=None, loglog=True, leg=T
         k, q = ds.isotropic_spectrum(key, z=z)
         if q.min() < 0:
             loglog = False
+            
+    kws = PlotOptions(datasets)
+    
+    legend_handles = []
 
-    for ds in datasets:
+    for l, ds in enumerate(datasets):
         k, q = ds.isotropic_spectrum(key, z=z)
         
         if key in ['APEflux','KEflux','APEgenspec','Dissipation']:
@@ -686,31 +742,44 @@ def compare_spectra(datasets, key='KEspec', z='sum', ax=None, loglog=True, leg=T
             plot_fn = ax.loglog
         else:
             plot_fn = ax.semilogx
+            
 
         kwargs = dict(ds.attrs.get('plot_kwargs', {}))
-        kwargs =dict(kwargs)
+        kwargs = dict(kwargs)
         if 'label' not in kwargs:
             kwargs['label'] = ds.label
+        kwargs.update(kws[l])
 
         i = np.argmin(np.abs(np.log(k) - np.log(kmin)))
         j = np.argmin(np.abs(np.log(k) - np.log(kmax)))
         lr = linregress(np.log(k[i:j]), np.log(q[i:j]))
 
         if loglog:
-            kwargs['label'] = kwargs.get('label', '') + " ($k^{"+f"{lr.slope:.2f}"+"}$)" 
+            kwargs['label'] = kwargs.get('label', '') + " (${\propto}k^{"+f"{lr.slope:.2f}"+"}$)" 
+            
+        line = plot_fn(k,q,lw=3,**kwargs,zorder=10)[0]
+        legend_handles.append(line)
 
-        line = plot_fn(k,q,lw=3,**kwargs,zorder=10)
+        plt.axvline(ds.twothirds_nyquist_frequency, color='gray', **kws[l])
+        plt.axvline(1/ds.m.rd, color='pink', **kws[l])
 
         if loglog and plot_fits:
-            plot_fn(k[i-1:j+1], np.exp(np.log(k[i-1:j+1]) * lr.slope + lr.intercept)*1.2, color=line[0]._color, ls=':', alpha=0.5)
+            plot_fn(k[i-1:j+1], np.exp(np.log(k[i-1:j+1]) * lr.slope + lr.intercept)*1.2, color=line._color, ls=kws[l]['ls'], alpha=0.5)
 
         maxes.append(q.max())
 
     if xlim is not None:
         ax.set_xlim(*xlim)
+    else:
+        ax.set_xlim(k.min(), 2e-4)
     if loglog: ax.set_ylim(min(maxes)/1000, max(maxes)*2)
-    if leg: ax.legend(loc='best',fontsize=legend_fontsize).set_zorder(11)
-    ax.grid()
+    if leg:
+        legend_handles += [
+            Patch(facecolor='pink', label='Deformation frequency', alpha=0.5),
+            Patch(facecolor='gray', label='65% Nyquist frequency', alpha=0.5),
+        ]
+        plt.legend(handles=legend_handles, loc='best',fontsize=legend_fontsize).set_zorder(11)
+    ax.grid(alpha=0.25)
 
     prefix = ''
     if z == 0:
