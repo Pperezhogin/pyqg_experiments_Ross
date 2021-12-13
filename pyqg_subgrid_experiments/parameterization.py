@@ -250,7 +250,7 @@ class CNNParameterization(Parameterization):
         self.directory = directory
         self.models = models if models is not None else [
             model_class.load(f)
-            for f in glob.glob(os.path.join(directory, "models/*"))
+            for f in sorted(glob.glob(os.path.join(directory, "models/*")))
         ]
 
     @property
