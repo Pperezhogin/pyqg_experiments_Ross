@@ -431,13 +431,18 @@ def animate_simulation(m, n_frames=100, steps_per_frame=100, label=None, suptitl
     anim = animation.FuncAnimation(fig, animate, frames=n_frames, interval=50, blit=True)
     return anim
 
-def imshow(arr, **kw):
+def imshow(arr, vmin=None, vmax=None, **kw):
     if isinstance(arr, xr.DataArray):
         arr = arr.data
-    if arr.min() >= 0:
-        cmap = 'inferno'; vmin = 0; vmax = np.percentile(arr.ravel(), 99)
+    if vmin is None or vmax is None:
+        if arr.min() >= 0:
+            vmin = 0; vmax = np.percentile(arr.ravel(), 99)
+        else:
+            vmax = np.percentile(np.abs(arr).ravel(), 99); vmin = -vmax
+    if vmin == 0:
+        cmap = 'inferno'
     else:
-        cmap = 'bwr'; vmax = np.percentile(np.abs(arr).ravel(), 99); vmin = -vmax
+        cmap = 'bwr'
     plt.imshow(arr, cmap=cmap, interpolation='none', vmin=vmin, vmax=vmax)
     for ticks in [plt.xticks, plt.yticks]:
         ticks([0,len(arr)//2, len(arr)], ['0', 'L/2', 'L'])
@@ -648,7 +653,7 @@ def compare_quantities(datasets, quantities=['q','u','ke','enstrophy'], time_ave
                 vmax = 0
                 vmin = 0
                 for ds in datasets:
-                    x = extract(ds, quantity, z)
+                    x = extract(ds, quantity, z).ravel()
                     vmax = max(vmax, np.percentile(x, 99))
                     vmin = min(vmin, np.percentile(x, 1))
                 if vmin < 0:
