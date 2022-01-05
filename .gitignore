@@ -13,3 +13,5 @@ pyqg_subgrid_experiments/tests/tmp
 dist
 pip-wheel-metadata
 tmp/
+pyqg_subgrid_experiments/try_train_cnn.ipynb
+pyqg_subgrid_experiments/.vscode

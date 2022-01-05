@@ -1,0 +1,66 @@
+CNNParameterization:
+    CNNParameterzation(directory) - init, reads list of models in directory
+    CNNParameterization(directory, models) - init, set list of models by argument
+    CNNParameterization(directory, models, models_class=myCNN) - init, custom CNN model
+
+    CNNParameterization.targets - return list of strings corresponding to all outputs
+
+    CNNParameterization.predict(dataset) - returns dictionary indexed by targets of numpy arrays 
+    with demension run x time x lev x height x width
+    performs conversion:
+        [models] x run x time x channel x height x width -> [target] x run x time x lev x height x width
+
+    dataset may contain any quantities, but must contain those needed for prediction
+
+    CNNParameterization.train_on() -- class method, i.e. returns instance. Takes dataset, directory, 
+    input and target strings, layers configuration and zero_mean
+
+    CNNParameterization.test_offline(dataset, out_netcdf):
+        conversion dataset -> xarray
+        predictions (dictionary) -> xarray (which is actually dictionary too)
+        save xarray to out_file
+
+CNNParameterization.train_on:
+    Construct list of models. Each model is of type FullyCNN, and is inited like:
+    FullyCNN([('q',0), ('q',1)], [('q_forcing_advection',0), ('q_forcing_advection', 1)], zero_mean)
+    where ('q',0) - tuple
+
+    There may be 1 or 2 models, they are indexed as "z" in (0,1) in model folder
+
+FullyCNN:
+    FullyCNN([('u',0)],[('q',0)]) - simplest initialization
+    FullyCNN.predict(dataset) - returns predictions as 5D ndarray = run x time x channel x height x width
+    FullyCNN.forward(xx), where xx = torch.tensor(batch, channel, height, width). No data normalization here
+    FullyCNN.extract_inputs(dataset) - returns 4D ndarray
+    FullyCNN.fit(net, x,y) - combination of rescaling to unit std and zero mean and call of function train,
+    x,y - 4D ndarrays. mean and std are given across channel dimension
+    FullyCNN.load(dir) - classmethod, returns an instance
+    FullyCNN.save(dir) - saves model
+    Instance state:
+        inputs
+        targets
+        input_scale
+        output_scale
+        zero_mean
+        dictionary
+
+ChannelwiseScaler:
+    ChannelwiseScaler(x) - init with 4D array x and computes mu, std as 4D arrays across channel dimension
+    ChannelwiseScaler.transform(x) - makes 4D array x sero mean and unit std across channel dim
+
+Debugger:
+    import pdb
+    pdb.set_trace() - breakpoint
+    start program as usual
+    list - show code
+    break line - breakpoint on line in a current file
+    continue - go to the next breakpoint
+    next - not nested run
+    step - nested run
+    break parameterization.py:100
+    python -m pdb train.py
+
+Xarray_write:
+    xr.dataset.to_netcdf(file)
+Xarray_read:
+    xr.open_dataset(file)
