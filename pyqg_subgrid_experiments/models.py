@@ -125,6 +125,10 @@ class ScaledModel(object):
         if device is None:
             device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
             self.to(device)
+
+        print('Current mode:', self.training)
+        self.eval()
+        print('Mode after eval():', self.training)
         
         X = self.input_scale.transform(self.extract_inputs(inputs))
 
@@ -157,6 +161,10 @@ class ScaledModel(object):
             self.input_scale = ChannelwiseScaler(inputs)
         if rescale or not hasattr(self, 'output_scale') or self.output_scale is None:
             self.output_scale = ChannelwiseScaler(targets, zero_mean=self.is_zero_mean)
+
+        print('Current mode:', self.training)
+        self.train()
+        print('Mode after train():', self.training)
         
         if type(self).__name__ == 'FullyCNN':
             train(self,
@@ -333,6 +341,9 @@ class ProbabilisticCNN(nn.Sequential, ScaledModel):
         n_std = self[-1].out_channels//2
 
         self.to('cpu')
+        print('Current mode:', self.training)
+        self.eval()
+        print('Mode after eval():', self.training)
         x = torch.rand(10,n_in,64,64).to('cpu')
         y = self.forward(x).to('cpu')
         print('min, max std :', y[:,n_std:,:,:].min().item(), y[:,n_std:,:,:].max().item())
