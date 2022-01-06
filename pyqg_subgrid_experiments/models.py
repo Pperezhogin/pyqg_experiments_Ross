@@ -225,6 +225,22 @@ class FullyCNN(nn.Sequential, ScaledModel):
 
 class ProbabilisticCNN(nn.Sequential, ScaledModel):
     def __init__(self, inputs, targets, padding_mode='circular'):
+        """
+        Inputs and targets are lists of tuples, for example:
+
+            input = [('q',0)]
+            
+        Here 'q' represents dynamic variable, 0 - ocean layer. 
+        This data will be extracted from dataset type.
+
+        Method forward works on NORMALIZED torch.tensor of size:
+
+            batch x channels x height x width
+
+        First half of output channels are for mean,
+        second half for variances. 
+        
+        """
         self.inputs = inputs
         self.targets = targets
         n_in = len(inputs)
@@ -246,9 +262,11 @@ class ProbabilisticCNN(nn.Sequential, ScaledModel):
         super().__init__(*blocks)
 
     def forward(self, x):
-        r = super().forward(x)
-        return r
-        
+        x = super().forward(x)
+        n_var = x.shape[1] // 2 # number of var channels
+        x[:,n_var:,:,:] = nn.functional.softplus(x[:,n_var:,:,:])
+        return x
+
     def _make_subblock(self, input_channels, output_channels, filter_size):
         subbloc = []
         subbloc.append(nn.Conv2d(input_channels, output_channels, 
