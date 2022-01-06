@@ -49,10 +49,13 @@ def train_probabilistic(net, inputs, targets, num_epochs=50, batch_size=64, lear
         net.to(device)
     optimizer = optim.Adam(net.parameters(), lr=learning_rate)
     scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[int(num_epochs/2), int(num_epochs*3/4), int(num_epochs*7/8)], gamma=0.1)
-    criterion = nn.GaussianNLLLoss(reduction='sum')
+    criterion = nn.GaussianNLLLoss()
+
+    net.loss_history = {'gauss': [], 'equiv_mse': []}
+
     for epoch in range(num_epochs):
         epoch_loss = 0.0
-        epoch_size = 0
+        epoch_steps = 0
         for x, y in minibatch(inputs, targets, batch_size=batch_size):
             optimizer.zero_grad()
             yhat = net.forward(x.to(device))
@@ -64,9 +67,14 @@ def train_probabilistic(net, inputs, targets, num_epochs=50, batch_size=64, lear
             loss.backward()
             optimizer.step()
             epoch_loss += loss.item()
-            epoch_size += x.shape[0]
-        print(f"Loss after Epoch {epoch+1}: {epoch_loss/epoch_size}")
+            epoch_steps += 1
+        
+        mean_loss = epoch_loss/epoch_steps
+        equiv_MSE = np.exp(-1. + 2 * mean_loss)
+        print(f"Gauss Loss after Epoch {epoch+1}: {mean_loss}, equiv MSE: {equiv_MSE}")
         scheduler.step()
+        net.loss_history['gauss'].append(mean_loss)
+        net.loss_history['equiv_mse'].append(equiv_MSE)
 
 class ScaledModel(object):
     @property
@@ -270,14 +278,16 @@ class ProbabilisticCNN(nn.Sequential, ScaledModel):
             batch x channels x height x width
 
         First half of output channels are for mean,
-        second half for variances. 
+        second half for stds. 
         
         """
         self.inputs = inputs
         self.targets = targets
+
         n_in = len(inputs)
-        n_out = len(targets) * 2 # mean + var
+        n_out = len(targets) * 2 # mean + std
         self.n_std = n_out // 2  # number of std channels
+        self.n_in  = n_in        # for check_channels
 
         self.padding_mode = 'circular' # fast pass of parameter
 
@@ -298,12 +308,20 @@ class ProbabilisticCNN(nn.Sequential, ScaledModel):
 
     def forward(self, x):
         x = super().forward(x)
-        x[:,self.n_std:,:,:] = nn.functional.softplus(x[:,self.n_std:,:,:])
-        return x
+        r = torch.zeros_like(x)
+        r[:,:self.n_std,:,:] = x[:,:self.n_std,:,:]
+        r[:,self.n_std:,:,:] = nn.functional.softplus(x[:,self.n_std:,:,:])
+        return r
 
     def _make_subblock(self, input_channels, output_channels, filter_size):
-        subbloc = []
-        subbloc.append(nn.Conv2d(input_channels, output_channels, 
-            filter_size, padding='same', padding_mode=self.padding_mode))
-        subbloc.append(nn.ReLU())
+        conv = nn.Conv2d(input_channels, output_channels, 
+            filter_size, padding='same', padding_mode=self.padding_mode)
+        subbloc = [conv, nn.ReLU()]
+        subbloc.append(nn.BatchNorm2d(conv.out_channels))
         return subbloc
+
+    def check_channels(self):
+        x = torch.rand(10,self.n_in,64,64).to('cuda')
+        y = self.forward(x)
+        print('min, max std :', y[:,self.n_std:,:,:].min().item(), y[:,self.n_std:,:,:].max().item())
+        print('min, max mean:', y[:,:self.n_std,:,:].min().item(), y[:,:self.n_std,:,:].max().item())
