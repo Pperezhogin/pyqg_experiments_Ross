@@ -43,6 +43,31 @@ def train(net, inputs, targets, num_epochs=50, batch_size=64, learning_rate=0.00
         print(f"Loss after Epoch {epoch+1}: {epoch_loss/epoch_steps}")
         scheduler.step()
 
+def train_probabilistic(net, inputs, targets, num_epochs=50, batch_size=64, learning_rate=0.001, device=None):
+    if device is None:
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        net.to(device)
+    optimizer = optim.Adam(net.parameters(), lr=learning_rate)
+    scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[int(num_epochs/2), int(num_epochs*3/4), int(num_epochs*7/8)], gamma=0.1)
+    criterion = nn.GaussianNLLLoss(reduction='sum')
+    for epoch in range(num_epochs):
+        epoch_loss = 0.0
+        epoch_size = 0
+        for x, y in minibatch(inputs, targets, batch_size=batch_size):
+            optimizer.zero_grad()
+            yhat = net.forward(x.to(device))
+            ytrue = y.to(device)
+
+            # last argument is the variance
+            loss = criterion(yhat[:,:net.n_std,:,:], ytrue, torch.square(yhat[:,net.n_std:,:,:]))
+
+            loss.backward()
+            optimizer.step()
+            epoch_loss += loss.item()
+            epoch_size += x.shape[0]
+        print(f"Loss after Epoch {epoch+1}: {epoch_loss/epoch_size}")
+        scheduler.step()
+
 class ScaledModel(object):
     @property
     def is_zero_mean(self):
@@ -121,10 +146,17 @@ class ScaledModel(object):
             self.input_scale = ChannelwiseScaler(inputs)
         if rescale or not hasattr(self, 'output_scale') or self.output_scale is None:
             self.output_scale = ChannelwiseScaler(targets, zero_mean=self.is_zero_mean)
-        train(self,
-              self.input_scale.transform(inputs),
-              self.output_scale.transform(targets),
-              **kw)
+        
+        if type(self).__name__ == 'FullyCNN':
+            train(self,
+                  self.input_scale.transform(inputs),
+                  self.output_scale.transform(targets),
+                  **kw)
+        elif type(self).__name__ == 'ProbabilisticCNN':
+            train_probabilistic(self,
+                  self.input_scale.transform(inputs),
+                  self.output_scale.transform(targets),
+                  **kw)
 
     def save(self, path):
         os.system(f"mkdir -p {path}")
@@ -224,7 +256,7 @@ class FullyCNN(nn.Sequential, ScaledModel):
         return subbloc
 
 class ProbabilisticCNN(nn.Sequential, ScaledModel):
-    def __init__(self, inputs, targets, padding_mode='circular'):
+    def __init__(self, inputs, targets, zero_mean = True):
         """
         Inputs and targets are lists of tuples, for example:
 
@@ -245,8 +277,9 @@ class ProbabilisticCNN(nn.Sequential, ScaledModel):
         self.targets = targets
         n_in = len(inputs)
         n_out = len(targets) * 2 # mean + var
+        self.n_std = n_out // 2  # number of std channels
 
-        self.padding_mode = padding_mode # fast pass of parameter
+        self.padding_mode = 'circular' # fast pass of parameter
 
         blocks = []
         blocks.extend(self._make_subblock(n_in,128,5))               #1
@@ -260,11 +293,12 @@ class ProbabilisticCNN(nn.Sequential, ScaledModel):
             padding='same', padding_mode=self.padding_mode))
 
         super().__init__(*blocks)
+        
+        self.set_zero_mean(zero_mean) # for proper scaling of targets
 
     def forward(self, x):
         x = super().forward(x)
-        n_var = x.shape[1] // 2 # number of var channels
-        x[:,n_var:,:,:] = nn.functional.softplus(x[:,n_var:,:,:])
+        x[:,self.n_std:,:,:] = nn.functional.softplus(x[:,self.n_std:,:,:])
         return x
 
     def _make_subblock(self, input_channels, output_channels, filter_size):
