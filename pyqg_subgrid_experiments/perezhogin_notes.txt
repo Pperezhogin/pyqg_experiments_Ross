@@ -51,14 +51,10 @@ ChannelwiseScaler:
 Debugger:
     import pdb
     pdb.set_trace() - breakpoint
-    start program as usual
-    list - show code
-    break line - breakpoint on line in a current file
-    continue - go to the next breakpoint
-    next - not nested run
-    step - nested run
-    break parameterization.py:100
-    python -m pdb train.py
+    debug in jupyter
+    set the following to automatic reloading:
+        %load_ext autoreload
+        %autoreload 2
 
 Xarray_write:
     xr.dataset.to_netcdf(file)

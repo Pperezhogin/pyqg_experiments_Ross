@@ -222,3 +222,36 @@ class FullyCNN(nn.Sequential, ScaledModel):
         if self.batch_norm:
             subbloc.append(nn.BatchNorm2d(conv.out_channels))
         return subbloc
+
+class ProbabilisticCNN(nn.Sequential, ScaledModel):
+    def __init__(self, inputs, targets, padding_mode='circular'):
+        self.inputs = inputs
+        self.targets = targets
+        n_in = len(inputs)
+        n_out = len(targets) * 2 # mean + var
+
+        self.padding_mode = padding_mode # fast pass of parameter
+
+        blocks = []
+        blocks.extend(self._make_subblock(n_in,128,5))               #1
+        blocks.extend(self._make_subblock(128,64,5))                 #2
+        blocks.extend(self._make_subblock(64,32,3))                  #3
+        blocks.extend(self._make_subblock(32,32,3))                  #4
+        blocks.extend(self._make_subblock(32,32,3))                  #5
+        blocks.extend(self._make_subblock(32,32,3))                  #6
+        blocks.extend(self._make_subblock(32,32,3))                  #7
+        blocks.append(nn.Conv2d(32, n_out, 3,                        #8
+            padding='same', padding_mode=self.padding_mode))
+
+        super().__init__(*blocks)
+
+    def forward(self, x):
+        r = super().forward(x)
+        return r
+        
+    def _make_subblock(self, input_channels, output_channels, filter_size):
+        subbloc = []
+        subbloc.append(nn.Conv2d(input_channels, output_channels, 
+            filter_size, padding='same', padding_mode=self.padding_mode))
+        subbloc.append(nn.ReLU())
+        return subbloc
