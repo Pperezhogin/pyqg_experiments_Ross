@@ -9,6 +9,7 @@ import pyqg
 import xarray as xr
 from collections import OrderedDict
 import pyqg_subgrid_experiments as pse
+import time
 
 def minibatch(*arrays, batch_size=64, as_tensor=True, shuffle=True):
     assert len(set([len(a) for a in arrays])) == 1
@@ -56,6 +57,7 @@ def train_probabilistic(net, inputs, targets, num_epochs=50, batch_size=64, lear
     for epoch in range(num_epochs):
         epoch_loss = 0.0
         epoch_steps = 0
+        t = time.time()
         for x, y in minibatch(inputs, targets, batch_size=batch_size):
             optimizer.zero_grad()
             yhat = net.forward(x.to(device))
@@ -71,7 +73,8 @@ def train_probabilistic(net, inputs, targets, num_epochs=50, batch_size=64, lear
         
         mean_loss = epoch_loss/epoch_steps
         equiv_MSE = np.exp(-1. + 2 * mean_loss)
-        print(f"Gauss Loss after Epoch {epoch+1}: {mean_loss}, equiv MSE: {equiv_MSE}")
+        ETA = (time.time() - t)/60*(num_epochs-epoch-1)
+        print(f"Gauss Loss after Epoch {epoch+1}: {mean_loss}, equiv MSE: {equiv_MSE}, remaining min:{ETA}")
         scheduler.step()
         net.loss_history['gauss'].append(mean_loss)
         net.loss_history['equiv_mse'].append(equiv_MSE)
@@ -180,6 +183,8 @@ class ScaledModel(object):
             pickle.dump(self.inputs, f)
         with open(f"{path}/targets.pkl", 'wb') as f:
             pickle.dump(self.targets, f)
+        with open(f"{path}/loss_history.pkl", 'wb') as f:
+            pickle.dump(self.loss_history, f)
         if self.is_zero_mean:
             open(f"{path}/zero_mean", 'a').close()
 
@@ -195,6 +200,8 @@ class ScaledModel(object):
             model.input_scale = pickle.load(f)
         with open(f"{path}/output_scale.pkl", 'rb') as f:
             model.output_scale = pickle.load(f)
+        with open(f"{path}/loss_history.pkl", 'rb') as f:
+            model.loss_history = pickle.load(f)
         if os.path.exists(f"{path}/zero_mean"):
             model.set_zero_mean()
         return model
@@ -287,7 +294,6 @@ class ProbabilisticCNN(nn.Sequential, ScaledModel):
         n_in = len(inputs)
         n_out = len(targets) * 2 # mean + std
         self.n_std = n_out // 2  # number of std channels
-        self.n_in  = n_in        # for check_channels
 
         self.padding_mode = 'circular' # fast pass of parameter
 
@@ -307,10 +313,12 @@ class ProbabilisticCNN(nn.Sequential, ScaledModel):
         self.set_zero_mean(zero_mean) # for proper scaling of targets
 
     def forward(self, x):
+        n_std = self[-1].out_channels//2
+
         x = super().forward(x)
         r = torch.zeros_like(x)
-        r[:,:self.n_std,:,:] = x[:,:self.n_std,:,:]
-        r[:,self.n_std:,:,:] = nn.functional.softplus(x[:,self.n_std:,:,:])
+        r[:,:n_std,:,:] = x[:,:n_std,:,:]
+        r[:,n_std:,:,:] = nn.functional.softplus(x[:,n_std:,:,:])
         return r
 
     def _make_subblock(self, input_channels, output_channels, filter_size):
@@ -321,7 +329,11 @@ class ProbabilisticCNN(nn.Sequential, ScaledModel):
         return subbloc
 
     def check_channels(self):
-        x = torch.rand(10,self.n_in,64,64).to('cuda')
-        y = self.forward(x)
-        print('min, max std :', y[:,self.n_std:,:,:].min().item(), y[:,self.n_std:,:,:].max().item())
-        print('min, max mean:', y[:,:self.n_std,:,:].min().item(), y[:,:self.n_std,:,:].max().item())
+        n_in = self[0].in_channels
+        n_std = self[-1].out_channels//2
+
+        self.to('cpu')
+        x = torch.rand(10,n_in,64,64).to('cpu')
+        y = self.forward(x).to('cpu')
+        print('min, max std :', y[:,n_std:,:,:].min().item(), y[:,n_std:,:,:].max().item())
+        print('min, max mean:', y[:,:n_std,:,:].min().item(), y[:,:n_std,:,:].max().item())
