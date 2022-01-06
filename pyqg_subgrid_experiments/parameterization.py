@@ -110,7 +110,7 @@ class Parameterization(object):
     def test_offline(self, dataset, offline_path=None):
         if offline_path is not None and os.path.exists(offline_path):
             return xr.open_dataset(offline_path)
-        
+               
         test = dataset[self.targets]
         
         for key, val in self.predict(dataset).items():
@@ -287,7 +287,9 @@ class CNNParameterization(Parameterization):
             layerwise_targets=None,
             num_epochs=50,
             zero_mean=True,
-            model_class=FullyCNN, **kw):
+            model_class=FullyCNN,
+            channel_type = None,
+            dataset_test = None, **kw):
 
         layers = range(len(dataset.lev))
 
@@ -299,7 +301,9 @@ class CNNParameterization(Parameterization):
                 model_class(
                     [(feat, z) for feat in inputs],
                     [(feat, z) for feat in targets],
-                    zero_mean=zero_mean
+                    zero_mean=zero_mean,
+                    channel_type=channel_type
+
                 ) for z in layers
             ]
         elif layerwise_targets:
@@ -309,7 +313,8 @@ class CNNParameterization(Parameterization):
                 model_class(
                     [(feat, zi) for feat in inputs for zi in layers],
                     [(feat, z) for feat in targets],
-                    zero_mean=zero_mean
+                    zero_mean=zero_mean,
+                    channel_type=channel_type
 
                 ) for z in layers
             ]
@@ -320,7 +325,8 @@ class CNNParameterization(Parameterization):
                 model_class(
                     [(feat, z) for feat in inputs for z in layers],
                     [(feat, z) for feat in targets for z in layers],
-                    zero_mean=zero_mean
+                    zero_mean=zero_mean,
+                    channel_type=channel_type
                 )
             ]
 
@@ -333,7 +339,9 @@ class CNNParameterization(Parameterization):
             else:
                 X = model.extract_inputs(dataset)
                 Y = model.extract_targets(dataset)
-                model.fit(X, Y, num_epochs=num_epochs, **kw)
+                X_test = model.extract_inputs(dataset_test)
+                Y_test = model.extract_targets(dataset_test)
+                model.fit(X, Y, inputs_test = X_test, targets_test = Y_test, num_epochs=num_epochs, **kw)
                 model.save(os.path.join(directory, f"models/{z}"))
                 models2.append(model)
 

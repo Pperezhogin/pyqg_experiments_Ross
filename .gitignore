@@ -15,4 +15,5 @@ pip-wheel-metadata
 tmp/
 pyqg_subgrid_experiments/try_train_cnn.ipynb
 pyqg_subgrid_experiments/.vscode
-pyqg_subgrid_experiments/PCNN
+pyqg_subgrid_experiments/PCNN*
+pyqg_subgrid_experiments/ROSS_cnn*

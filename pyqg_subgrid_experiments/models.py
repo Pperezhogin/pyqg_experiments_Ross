@@ -44,15 +44,40 @@ def train(net, inputs, targets, num_epochs=50, batch_size=64, learning_rate=0.00
         print(f"Loss after Epoch {epoch+1}: {epoch_loss/epoch_steps}")
         scheduler.step()
 
-def train_probabilistic(net, inputs, targets, num_epochs=50, batch_size=64, learning_rate=0.001, device=None):
+class custom_loss():
+    def __init__(self, loss_type, det_ch):
+        self.loss_type = loss_type
+        self.det_ch = det_ch
+
+        if loss_type in ('std', 'var'):
+            self.criterion = nn.GaussianNLLLoss()
+        elif loss_type == 'mse':
+            self.criterion = nn.MSELoss()
+        else:
+            print('error: loss is not chosen')
+
+    def loss(self, yhat, ytrue):
+        if self.loss_type == 'std':
+            return self.criterion(yhat[:,:self.det_ch,:,:], ytrue, torch.square(yhat[:,self.det_ch:,:,:]))
+        elif self.loss_type == 'var':
+            return self.criterion(yhat[:,:self.det_ch,:,:], ytrue, yhat[:,self.det_ch:,:,:])
+        elif self.loss_type == 'mse':
+            return self.criterion(yhat[:,:self.det_ch,:,:], ytrue)
+
+def train_probabilistic(net, inputs, targets, num_epochs=50, batch_size=64, 
+    learning_rate=0.001, device=None, inputs_test = None, targets_test = None):
     if device is None:
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         net.to(device)
+
+    net.inference_stochastic = True
     optimizer = optim.Adam(net.parameters(), lr=learning_rate)
     scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[int(num_epochs/2), int(num_epochs*3/4), int(num_epochs*7/8)], gamma=0.1)
-    criterion = nn.GaussianNLLLoss()
+    
+    criterion = custom_loss(net.channel_type, net[-1].out_channels//2)
 
-    net.loss_history = {'gauss': [], 'equiv_mse': []}
+    net.loss_history = {'train_gauss': [], 'train_mse': [], 'train_noise': [],
+                        'test_gauss': [], 'test_mse': [], 'test_noise': []}
 
     for epoch in range(num_epochs):
         epoch_loss = 0.0
@@ -64,20 +89,72 @@ def train_probabilistic(net, inputs, targets, num_epochs=50, batch_size=64, lear
             ytrue = y.to(device)
 
             # last argument is the variance
-            loss = criterion(yhat[:,:net.n_std,:,:], ytrue, torch.square(yhat[:,net.n_std:,:,:]))
+            loss = criterion.loss(yhat, ytrue)
 
             loss.backward()
             optimizer.step()
-            epoch_loss += loss.item()
-            epoch_steps += 1
+            weight = yhat.shape[0]
+            epoch_loss += weight * loss.item()
+            epoch_steps += weight
         
-        mean_loss = epoch_loss/epoch_steps
-        equiv_MSE = np.exp(-1. + 2 * mean_loss)
+        test_loss(net, inputs, targets, inputs_test, targets_test)
         ETA = (time.time() - t)/60*(num_epochs-epoch-1)
-        print(f"Gauss Loss after Epoch {epoch+1}: {mean_loss}, equiv MSE: {equiv_MSE}, remaining min:{ETA}")
+        print(f"Gauss Loss after Epoch {epoch+1}: {epoch_loss/epoch_steps}, remaining min:{ETA}")
         scheduler.step()
-        net.loss_history['gauss'].append(mean_loss)
-        net.loss_history['equiv_mse'].append(equiv_MSE)
+
+def test_loss(net, inputs, targets, inputs_test, targets_test, batch_size=64):
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    net.to(device)
+
+    net.eval()
+    net.inference_stochastic = True
+
+    mse_loss   = custom_loss('mse', net[-1].out_channels//2)
+    gauss_loss = custom_loss(net.channel_type, net[-1].out_channels//2)
+
+    epoch_gauss = 0.
+    epoch_mse = 0.
+    epoch_noise = 0.
+    epoch_steps = 0
+    for x,y in minibatch(inputs, targets, batch_size=batch_size, shuffle=False):
+        with torch.no_grad():
+            yhat  = net.forward(x.to(device))
+        ytrue = y.to(device)
+
+        noise = net.generate_noise(yhat)     
+
+        weight = yhat.shape[0]
+        epoch_gauss += weight * gauss_loss.loss(yhat, ytrue).item()
+        epoch_mse   += weight * mse_loss.loss(yhat, ytrue).item()
+        epoch_noise += weight * noise.var().item()
+        epoch_steps += weight
+
+    net.loss_history['train_gauss'].append(epoch_gauss/epoch_steps)
+    net.loss_history['train_mse'].append(epoch_mse/epoch_steps)
+    net.loss_history['train_noise'].append(epoch_noise/epoch_steps)
+
+    epoch_gauss = 0.
+    epoch_mse = 0.
+    epoch_noise = 0.
+    epoch_steps = 0
+    for x,y in minibatch(inputs_test, targets_test, batch_size=batch_size, shuffle=False):
+        with torch.no_grad():
+            yhat  = net.forward(x.to(device))
+        ytrue = y.to(device)
+
+        noise = net.generate_noise(yhat)     
+
+        weight = yhat.shape[0]
+        epoch_gauss += weight * gauss_loss.loss(yhat, ytrue).item()
+        epoch_mse   += weight * mse_loss.loss(yhat, ytrue).item()
+        epoch_noise += weight * noise.var().item()
+        epoch_steps += weight
+
+    net.loss_history['test_gauss'].append(epoch_gauss/epoch_steps)
+    net.loss_history['test_mse'].append(epoch_mse/epoch_steps)
+    net.loss_history['test_noise'].append(epoch_noise/epoch_steps)
+
+    net.train()
 
 class ScaledModel(object):
     @property
@@ -129,6 +206,7 @@ class ScaledModel(object):
         print('Current mode:', self.training)
         self.eval()
         print('Mode after eval():', self.training)
+        self.inference_stochastic = False
         
         X = self.input_scale.transform(self.extract_inputs(inputs))
 
@@ -156,7 +234,7 @@ class ScaledModel(object):
         y_pred = self.predict(inputs).reshape(-1, np.prod(targets.shape[1:]))
         return np.mean(np.sum((y_pred - y_true)**2, axis=1))
 
-    def fit(self, inputs, targets, rescale=False, **kw):
+    def fit(self, inputs, targets, rescale=False, inputs_test = None, targets_test = None, **kw):
         if rescale or not hasattr(self, 'input_scale') or self.input_scale is None:
             self.input_scale = ChannelwiseScaler(inputs)
         if rescale or not hasattr(self, 'output_scale') or self.output_scale is None:
@@ -175,6 +253,8 @@ class ScaledModel(object):
             train_probabilistic(self,
                   self.input_scale.transform(inputs),
                   self.output_scale.transform(targets),
+                  inputs_test = self.input_scale.transform(inputs_test),
+                  targets_test = self.output_scale.transform(targets_test),
                   **kw)
 
     def save(self, path):
@@ -191,8 +271,11 @@ class ScaledModel(object):
             pickle.dump(self.inputs, f)
         with open(f"{path}/targets.pkl", 'wb') as f:
             pickle.dump(self.targets, f)
-        with open(f"{path}/loss_history.pkl", 'wb') as f:
-            pickle.dump(self.loss_history, f)
+        try:
+            with open(f"{path}/loss_history.pkl", 'wb') as f:
+                pickle.dump(self.loss_history, f)
+        except:
+            pass
         if self.is_zero_mean:
             open(f"{path}/zero_mean", 'a').close()
 
@@ -208,8 +291,11 @@ class ScaledModel(object):
             model.input_scale = pickle.load(f)
         with open(f"{path}/output_scale.pkl", 'rb') as f:
             model.output_scale = pickle.load(f)
-        with open(f"{path}/loss_history.pkl", 'rb') as f:
-            model.loss_history = pickle.load(f)
+        try:
+            with open(f"{path}/loss_history.pkl", 'rb') as f:
+                model.loss_history = pickle.load(f)
+        except:
+            pass
         if os.path.exists(f"{path}/zero_mean"):
             model.set_zero_mean()
         return model
@@ -279,7 +365,7 @@ class FullyCNN(nn.Sequential, ScaledModel):
         return subbloc
 
 class ProbabilisticCNN(nn.Sequential, ScaledModel):
-    def __init__(self, inputs, targets, zero_mean = True):
+    def __init__(self, inputs, targets, zero_mean = True, channel_type = None):
         """
         Inputs and targets are lists of tuples, for example:
 
@@ -301,7 +387,7 @@ class ProbabilisticCNN(nn.Sequential, ScaledModel):
 
         n_in = len(inputs)
         n_out = len(targets) * 2 # mean + std
-        self.n_std = n_out // 2  # number of std channels
+        self.channel_type = channel_type # type of stochastic channels, var or std
 
         self.padding_mode = 'circular' # fast pass of parameter
 
@@ -318,16 +404,36 @@ class ProbabilisticCNN(nn.Sequential, ScaledModel):
 
         super().__init__(*blocks)
         
-        self.set_zero_mean(zero_mean) # for proper scaling of targets
+        self.set_zero_mean(zero_mean)       # for proper scaling of targets
+        self.inference_stochastic = True    # trigger for method forward
 
     def forward(self, x):
-        n_std = self[-1].out_channels//2
+        # number of channels predicting deterministic part
+        det_ch = self[-1].out_channels//2
 
         x = super().forward(x)
-        r = torch.zeros_like(x)
-        r[:,:n_std,:,:] = x[:,:n_std,:,:]
-        r[:,n_std:,:,:] = nn.functional.softplus(x[:,n_std:,:,:])
-        return r
+
+        if self.inference_stochastic:
+            r = torch.zeros_like(x)
+            r[:,:det_ch,:,:] = x[:,:det_ch,:,:]
+            r[:,det_ch:,:,:] = nn.functional.softplus(x[:,det_ch:,:,:])
+            return r
+        else:
+            return x[:,:det_ch,:,:]
+    
+    def generate_noise(self, yhat):        
+        """
+        Takes full prediction of network
+        and generates noise
+        """
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        det_ch = self[-1].out_channels//2
+
+        stds = yhat[:,det_ch:,:,:]
+        if (self.channel_type == 'var'):
+            stds = torch.sqrt(stds)
+
+        return stds * torch.randn(stds.shape).to(device)
 
     def _make_subblock(self, input_channels, output_channels, filter_size):
         conv = nn.Conv2d(input_channels, output_channels, 
@@ -338,7 +444,8 @@ class ProbabilisticCNN(nn.Sequential, ScaledModel):
 
     def check_channels(self):
         n_in = self[0].in_channels
-        n_std = self[-1].out_channels//2
+        det_ch = self[-1].out_channels//2
+        self.inference_stochastic = True
 
         self.to('cpu')
         print('Current mode:', self.training)
@@ -346,5 +453,5 @@ class ProbabilisticCNN(nn.Sequential, ScaledModel):
         print('Mode after eval():', self.training)
         x = torch.rand(10,n_in,64,64).to('cpu')
         y = self.forward(x).to('cpu')
-        print('min, max std :', y[:,n_std:,:,:].min().item(), y[:,n_std:,:,:].max().item())
-        print('min, max mean:', y[:,:n_std,:,:].min().item(), y[:,:n_std,:,:].max().item())
+        print('min, max mean:', y[:,:det_ch,:,:].min().item(), y[:,:det_ch,:,:].max().item())
+        print('min, max std :', y[:,det_ch:,:,:].min().item(), y[:,det_ch:,:,:].max().item())
