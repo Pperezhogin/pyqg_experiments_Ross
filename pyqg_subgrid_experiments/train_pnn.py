@@ -46,7 +46,8 @@ param = pse.CNNParameterization.train_on(train, args.save_dir,
             model_class=ProbabilisticCNN,
             learning_rate=args.learning_rate,
             dataset_test=test,
-            channel_type=args.channel_type)
+            channel_type=args.channel_type,
+            cosine_annealing=True)
 
 param.test_offline(test, os.path.join(test_dir, "offline_metrics.nc"))
 param.test_offline(xfer, os.path.join(xfer_dir, "offline_metrics.nc"))
