@@ -56,23 +56,37 @@ class custom_loss():
         else:
             print('error: loss is not chosen')
 
-    def loss(self, yhat, ytrue):
+    def loss(self, yhat, ytrue, regularization = 0):
         if self.loss_type == 'std':
-            return self.criterion(yhat[:,:self.det_ch,:,:], ytrue, torch.square(yhat[:,self.det_ch:,:,:]))
+            mean_tensor = yhat[:,:self.det_ch,:,:]
+            var_tensor = torch.square(yhat[:,self.det_ch:,:,:])
+            
+            r = self.criterion(mean_tensor, ytrue, var_tensor) + \
+                regularization * var_tensor.mean()
+            return r
         elif self.loss_type == 'var':
-            return self.criterion(yhat[:,:self.det_ch,:,:], ytrue, yhat[:,self.det_ch:,:,:])
+            mean_tensor = yhat[:,:self.det_ch,:,:]
+            var_tensor = yhat[:,self.det_ch:,:,:]
+            r = self.criterion(mean_tensor, ytrue, var_tensor) + \
+                regularization * var_tensor.mean()
+            return r
         elif self.loss_type == 'mse':
-            return self.criterion(yhat[:,:self.det_ch,:,:], ytrue)
+            mean_tensor = yhat[:,:self.det_ch,:,:]
+            return self.criterion(mean_tensor, ytrue)
 
 def train_probabilistic(net, inputs, targets, num_epochs=50, batch_size=64, 
-    learning_rate=0.001, device=None, inputs_test = None, targets_test = None):
+    learning_rate=0.001, device=None, inputs_test = None, targets_test = None, regularization = 0.,
+    cosine_annealing = False):
     if device is None:
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         net.to(device)
 
     net.inference_stochastic = True
     optimizer = optim.Adam(net.parameters(), lr=learning_rate)
-    scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[int(num_epochs/2), int(num_epochs*3/4), int(num_epochs*7/8)], gamma=0.1)
+    if cosine_annealing:
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, 8, T_mult=2, last_epoch=-1)
+    else:
+        scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[int(num_epochs/2), int(num_epochs*3/4), int(num_epochs*7/8)], gamma=0.1)
     
     criterion = custom_loss(net.channel_type, net[-1].out_channels//2)
 
@@ -89,7 +103,7 @@ def train_probabilistic(net, inputs, targets, num_epochs=50, batch_size=64,
             ytrue = y.to(device)
 
             # last argument is the variance
-            loss = criterion.loss(yhat, ytrue)
+            loss = criterion.loss(yhat, ytrue, regularization)
 
             loss.backward()
             optimizer.step()
