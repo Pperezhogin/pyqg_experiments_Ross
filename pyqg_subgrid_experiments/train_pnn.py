@@ -19,6 +19,7 @@ parser.add_argument('--zero_mean', type=int, default=1)
 parser.add_argument('--num_epochs', type=int, default=50)
 parser.add_argument('--learning_rate', type=float, default=0.0001)
 parser.add_argument('--channel_type', type=str, default='var')
+parser.add_argument('--regularization', type=float, default=1.)
 args = parser.parse_args()
 
 print(args)
@@ -47,7 +48,9 @@ param = pse.CNNParameterization.train_on(train, args.save_dir,
             learning_rate=args.learning_rate,
             dataset_test=test,
             channel_type=args.channel_type,
-            cosine_annealing=True)
+            cosine_annealing=False,
+            regularization = args.regularization,
+            )
 
 param.test_offline(test, os.path.join(test_dir, "offline_metrics.nc"))
 param.test_offline(xfer, os.path.join(xfer_dir, "offline_metrics.nc"))

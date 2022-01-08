@@ -62,13 +62,15 @@ class custom_loss():
             var_tensor = torch.square(yhat[:,self.det_ch:,:,:])
             
             r = self.criterion(mean_tensor, ytrue, var_tensor) + \
-                regularization * var_tensor.mean()
+                regularization * \
+                torch.square(torch.square(mean_tensor-ytrue).mean()-var_tensor.mean())
             return r
         elif self.loss_type == 'var':
             mean_tensor = yhat[:,:self.det_ch,:,:]
             var_tensor = yhat[:,self.det_ch:,:,:]
             r = self.criterion(mean_tensor, ytrue, var_tensor) + \
-                regularization * var_tensor.mean()
+                regularization * \
+                torch.square(torch.square(mean_tensor-ytrue).mean()-var_tensor.mean())
             return r
         elif self.loss_type == 'mse':
             mean_tensor = yhat[:,:self.det_ch,:,:]
