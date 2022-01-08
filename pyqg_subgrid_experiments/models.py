@@ -432,7 +432,7 @@ class ProbabilisticCNN(nn.Sequential, ScaledModel):
         if self.inference_stochastic:
             r = torch.zeros_like(x)
             r[:,:det_ch,:,:] = x[:,:det_ch,:,:]
-            r[:,det_ch:,:,:] = nn.functional.softplus(x[:,det_ch:,:,:])
+            r[:,det_ch:,:,:] = nn.functional.softplus(x[:,det_ch:,:,:]).mean()
             return r
         else:
             return x[:,:det_ch,:,:]
