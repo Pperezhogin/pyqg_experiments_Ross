@@ -340,7 +340,7 @@ class ChannelwiseScaler(BasicScaler):
         super().__init__(mu, sd)
 
 class FullyCNN(nn.Sequential, ScaledModel):
-    def __init__(self, inputs, targets, padding='same', batch_norm=True, zero_mean=False):
+    def __init__(self, inputs, targets, padding='same', batch_norm=True, zero_mean=False, channel_type = None):
         if padding is None:
             padding_5 = 0
             padding_3 = 0
