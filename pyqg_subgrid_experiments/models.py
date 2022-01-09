@@ -78,12 +78,11 @@ class custom_loss():
 
 def train_probabilistic(net, inputs, targets, num_epochs=50, batch_size=64, 
     learning_rate=0.001, device=None, inputs_test = None, targets_test = None, regularization = 0.,
-    cosine_annealing = False):
+    cosine_annealing = False, epoch_var = 0):
     if device is None:
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         net.to(device)
 
-    net.inference_stochastic = True
     optimizer = optim.Adam(net.parameters(), lr=learning_rate)
     if cosine_annealing:
         scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, 8, T_mult=2, last_epoch=-1)
@@ -92,16 +91,19 @@ def train_probabilistic(net, inputs, targets, num_epochs=50, batch_size=64,
     
     criterion = custom_loss(net.channel_type, net[-1].out_channels//2)
 
-    net.loss_history = {'train_gauss': [], 'train_mse': [], 'train_noise': [],
-                        'test_gauss': [], 'test_mse': [], 'test_noise': []}
+    net.loss_history = {'train_gauss': [], 'train_mse': [], 'train_noise': [], 'train_log_noise': [],
+                        'test_gauss': [], 'test_mse': [], 'test_noise': [], 'test_log_noise': []}
 
+    average_variance = True
     for epoch in range(num_epochs):
+        if epoch == epoch_var:
+            average_variance = False
         epoch_loss = 0.0
         epoch_steps = 0
         t = time.time()
         for x, y in minibatch(inputs, targets, batch_size=batch_size):
             optimizer.zero_grad()
-            yhat = net.forward(x.to(device))
+            yhat = net.forward(x.to(device), average_variance=average_variance)
             ytrue = y.to(device)
 
             # last argument is the variance
@@ -123,7 +125,6 @@ def test_loss(net, inputs, targets, inputs_test, targets_test, batch_size=64):
     net.to(device)
 
     net.eval()
-    net.inference_stochastic = True
 
     mse_loss   = custom_loss('mse', net[-1].out_channels//2)
     gauss_loss = custom_loss(net.channel_type, net[-1].out_channels//2)
@@ -131,6 +132,7 @@ def test_loss(net, inputs, targets, inputs_test, targets_test, batch_size=64):
     epoch_gauss = 0.
     epoch_mse = 0.
     epoch_noise = 0.
+    epoch_log_noise = 0.
     epoch_steps = 0
     for x,y in minibatch(inputs, targets, batch_size=batch_size, shuffle=False):
         with torch.no_grad():
@@ -142,16 +144,19 @@ def test_loss(net, inputs, targets, inputs_test, targets_test, batch_size=64):
         weight = yhat.shape[0]
         epoch_gauss += weight * gauss_loss.loss(yhat, ytrue).item()
         epoch_mse   += weight * mse_loss.loss(yhat, ytrue).item()
-        epoch_noise += weight * noise.var().item()
+        epoch_noise += weight * net.var_mean(yhat).item()
+        epoch_log_noise += weight * net.log_var_mean(yhat).item()
         epoch_steps += weight
 
     net.loss_history['train_gauss'].append(epoch_gauss/epoch_steps)
     net.loss_history['train_mse'].append(epoch_mse/epoch_steps)
     net.loss_history['train_noise'].append(epoch_noise/epoch_steps)
+    net.loss_history['train_log_noise'].append(epoch_log_noise/epoch_steps)
 
     epoch_gauss = 0.
     epoch_mse = 0.
     epoch_noise = 0.
+    epoch_log_noise = 0.
     epoch_steps = 0
     for x,y in minibatch(inputs_test, targets_test, batch_size=batch_size, shuffle=False):
         with torch.no_grad():
@@ -163,12 +168,14 @@ def test_loss(net, inputs, targets, inputs_test, targets_test, batch_size=64):
         weight = yhat.shape[0]
         epoch_gauss += weight * gauss_loss.loss(yhat, ytrue).item()
         epoch_mse   += weight * mse_loss.loss(yhat, ytrue).item()
-        epoch_noise += weight * noise.var().item()
+        epoch_noise += weight * net.var_mean(yhat).item()
+        epoch_log_noise += weight * net.log_var_mean(yhat).item()
         epoch_steps += weight
 
     net.loss_history['test_gauss'].append(epoch_gauss/epoch_steps)
     net.loss_history['test_mse'].append(epoch_mse/epoch_steps)
     net.loss_history['test_noise'].append(epoch_noise/epoch_steps)
+    net.loss_history['test_log_noise'].append(epoch_log_noise/epoch_steps)
 
     net.train()
 
@@ -222,7 +229,7 @@ class ScaledModel(object):
         print('Current mode:', self.training)
         self.eval()
         print('Mode after eval():', self.training)
-        self.inference_stochastic = False
+
         
         X = self.input_scale.transform(self.extract_inputs(inputs))
 
@@ -230,7 +237,7 @@ class ScaledModel(object):
         for x, in minibatch(X, shuffle=False):
             x = x.to(device)
             with torch.no_grad():
-                preds.append(self.forward(x).cpu().numpy())
+                preds.append(self.forward(x,additional_channel = False).cpu().numpy())
 
         preds = self.output_scale.inverse_transform(np.vstack(preds))
 
@@ -367,7 +374,7 @@ class FullyCNN(nn.Sequential, ScaledModel):
                             *block6, *block7, conv8)
         self.set_zero_mean(zero_mean)
 
-    def forward(self, x):
+    def forward(self, x, additional_channel = False):
         r = super().forward(x)
         if self.is_zero_mean:
             return r - r.mean(dim=(1,2,3), keepdim=True)
@@ -421,18 +428,20 @@ class ProbabilisticCNN(nn.Sequential, ScaledModel):
         super().__init__(*blocks)
         
         self.set_zero_mean(zero_mean)       # for proper scaling of targets
-        self.inference_stochastic = True    # trigger for method forward
 
-    def forward(self, x):
+    def forward(self, x, additional_channel = True, average_variance = False):
         # number of channels predicting deterministic part
         det_ch = self[-1].out_channels//2
 
         x = super().forward(x)
 
-        if self.inference_stochastic:
+        if additional_channel:
             r = torch.zeros_like(x)
             r[:,:det_ch,:,:] = x[:,:det_ch,:,:]
-            r[:,det_ch:,:,:] = nn.functional.softplus(x[:,det_ch:,:,:]).mean()
+            if (average_variance):
+                r[:,det_ch:,:,:] = nn.functional.softplus(x[:,det_ch:,:,:]).mean()
+            else:
+                r[:,det_ch:,:,:] = nn.functional.softplus(x[:,det_ch:,:,:])
             return r
         else:
             return x[:,:det_ch,:,:]
@@ -451,6 +460,26 @@ class ProbabilisticCNN(nn.Sequential, ScaledModel):
 
         return stds * torch.randn(stds.shape).to(device)
 
+    def var_mean(self, yhat):        
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        det_ch = self[-1].out_channels//2
+
+        vars = yhat[:,det_ch:,:,:]
+        if (self.channel_type == 'std'):
+            vars = torch.square(vars)
+
+        return vars.mean()
+
+    def log_var_mean(self, yhat):        
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        det_ch = self[-1].out_channels//2
+
+        vars = yhat[:,det_ch:,:,:]
+        if (self.channel_type == 'std'):
+            vars = torch.square(vars)
+
+        return 0.5 + 0.5 * torch.log(vars).mean()
+
     def _make_subblock(self, input_channels, output_channels, filter_size):
         conv = nn.Conv2d(input_channels, output_channels, 
             filter_size, padding='same', padding_mode=self.padding_mode)
@@ -461,7 +490,6 @@ class ProbabilisticCNN(nn.Sequential, ScaledModel):
     def check_channels(self):
         n_in = self[0].in_channels
         det_ch = self[-1].out_channels//2
-        self.inference_stochastic = True
 
         self.to('cpu')
         print('Current mode:', self.training)
