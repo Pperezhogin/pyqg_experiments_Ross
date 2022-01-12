@@ -10,6 +10,7 @@ import xarray as xr
 from collections import OrderedDict
 import pyqg_subgrid_experiments as pse
 import time
+import pdb
 
 def minibatch(*arrays, batch_size=64, as_tensor=True, shuffle=True):
     assert len(set([len(a) for a in arrays])) == 1
@@ -96,6 +97,7 @@ def train_probabilistic(net, inputs, targets, num_epochs=50, batch_size=64,
 
     average_variance = True
     for epoch in range(num_epochs):
+        mean_linear = epoch / epoch_var
         if epoch == epoch_var:
             average_variance = False
         epoch_loss = 0.0
@@ -103,7 +105,8 @@ def train_probabilistic(net, inputs, targets, num_epochs=50, batch_size=64,
         t = time.time()
         for x, y in minibatch(inputs, targets, batch_size=batch_size):
             optimizer.zero_grad()
-            yhat = net.forward(x.to(device), average_variance=average_variance)
+            yhat = net.forward(x.to(device), average_variance=average_variance, 
+            mean_linear=mean_linear)
             ytrue = y.to(device)
 
             # last argument is the variance
@@ -221,15 +224,14 @@ class ScaledModel(object):
     def extract_targets(self, m):
         return self.extract_vars(m, self.targets)
 
-    def predict(self, inputs, device=None):
+    def predict(self, inputs, device=None, additional_channel = False):
         if device is None:
             device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
             self.to(device)
 
         print('Current mode:', self.training)
         self.eval()
-        print('Mode after eval():', self.training)
-
+        print('Mode after eval():', self.training)    
         
         X = self.input_scale.transform(self.extract_inputs(inputs))
 
@@ -237,14 +239,21 @@ class ScaledModel(object):
         for x, in minibatch(X, shuffle=False):
             x = x.to(device)
             with torch.no_grad():
-                preds.append(self.forward(x,additional_channel = False).cpu().numpy())
+                preds.append(self.forward(x,additional_channel = additional_channel).cpu().numpy())
 
-        preds = self.output_scale.inverse_transform(np.vstack(preds))
+        if additional_channel:
+            det_ch = self[-1].out_channels//2
+            preds = np.vstack(preds)
+            preds[:,:det_ch,:,:] = self.output_scale.inverse_transform(preds[:,:det_ch,:,:])
+            preds[:,det_ch:,:,:] = self.output_scale.inverse_transform_var(preds[:,det_ch:,:,:], self.channel_type)
+            print('I am here')
+        else:
+            preds = self.output_scale.inverse_transform(np.vstack(preds))
 
         s = list(inputs.q.shape)
         preds = np.stack([
             preds[:,i].reshape(s[:-3] + s[-2:])
-            for i in range(len(self.targets))
+            for i in range(preds.shape[1])
         ], axis=-3)
 
         if isinstance(inputs, pyqg.Model):
@@ -303,12 +312,12 @@ class ScaledModel(object):
             open(f"{path}/zero_mean", 'a').close()
 
     @classmethod
-    def load(cls, path):
+    def load(cls, path, channel_type):
         with open(f"{path}/inputs.pkl", 'rb') as f:
             inputs = pickle.load(f)
         with open(f"{path}/targets.pkl", 'rb') as f:
             targets = pickle.load(f)
-        model = cls(inputs, targets)
+        model = cls(inputs, targets, channel_type=channel_type)
         model.load_state_dict(torch.load(f"{path}/weights.pt"))
         with open(f"{path}/input_scale.pkl", 'rb') as f:
             model.input_scale = pickle.load(f)
@@ -333,6 +342,12 @@ class BasicScaler(object):
     
     def inverse_transform(self, z):
         return z * self.sd + self.mu
+    
+    def inverse_transform_var(self, z, channel_type):
+        if channel_type == 'std':
+            return z * self.sd
+        if channel_type == 'var':
+            return z * (self.sd ** 2)
 
 class ChannelwiseScaler(BasicScaler):
     def __init__(self, x, zero_mean=False):
@@ -411,6 +426,7 @@ class ProbabilisticCNN(nn.Sequential, ScaledModel):
         n_in = len(inputs)
         n_out = len(targets) * 2 # mean + std
         self.channel_type = channel_type # type of stochastic channels, var or std
+        print('self.channel_type:', self.channel_type)
 
         self.padding_mode = 'circular' # fast pass of parameter
 
@@ -429,7 +445,8 @@ class ProbabilisticCNN(nn.Sequential, ScaledModel):
         
         self.set_zero_mean(zero_mean)       # for proper scaling of targets
 
-    def forward(self, x, additional_channel = True, average_variance = False):
+    def forward(self, x, additional_channel = True, average_variance = False, 
+        mean_linear = 0.):
         # number of channels predicting deterministic part
         det_ch = self[-1].out_channels//2
 
@@ -438,10 +455,12 @@ class ProbabilisticCNN(nn.Sequential, ScaledModel):
         if additional_channel:
             r = torch.zeros_like(x)
             r[:,:det_ch,:,:] = x[:,:det_ch,:,:]
+            var_channel = nn.functional.softplus(x[:,det_ch:,:,:])
             if (average_variance):
-                r[:,det_ch:,:,:] = nn.functional.softplus(x[:,det_ch:,:,:]).mean()
+                r[:,det_ch:,:,:] = mean_linear * var_channel + \
+                                   (1. - mean_linear) * var_channel.mean() 
             else:
-                r[:,det_ch:,:,:] = nn.functional.softplus(x[:,det_ch:,:,:])
+                r[:,det_ch:,:,:] = var_channel
             return r
         else:
             return x[:,:det_ch,:,:]

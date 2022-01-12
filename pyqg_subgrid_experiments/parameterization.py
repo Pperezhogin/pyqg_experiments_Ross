@@ -6,6 +6,7 @@ import numpy as np
 import xarray as xr
 import pyqg
 import pyqg_subgrid_experiments as pse
+import pdb
 from pyqg_subgrid_experiments.models import FullyCNN
 from pyqg_subgrid_experiments.simulate import generate_dataset, time_until_uncorrelated
 
@@ -110,39 +111,44 @@ class Parameterization(object):
     def test_offline(self, dataset, offline_path=None):
         if offline_path is not None and os.path.exists(offline_path):
             return xr.open_dataset(offline_path)
-               
+
         test = dataset[self.targets]
         
-        for key, val in self.predict(dataset).items():
-            truth = test[key]
-            test[f"{key}_predictions"] = truth*0 + val
-            preds = test[f"{key}_predictions"]
-            error = (truth - preds)**2
+        for key, val in self.predict_var(dataset).items():
+            if key == 'q_forcing_advection_var':
+                print('I am in var')
+                test[f"{key}_predictions"] = dataset.q * 0 + val
+                #pdb.set_trace()
+            else:
+                truth = test[key]
+                test[f"{key}_predictions"] = truth*0 + val
+                preds = test[f"{key}_predictions"]
+                error = (truth - preds)**2
 
-            true_centered = (truth - truth.mean())
-            pred_centered = (preds - preds.mean())
-            true_var = true_centered**2
-            pred_var = pred_centered**2
-            true_pred_cov = true_centered * pred_centered
+                true_centered = (truth - truth.mean())
+                pred_centered = (preds - preds.mean())
+                true_var = true_centered**2
+                pred_var = pred_centered**2
+                true_pred_cov = true_centered * pred_centered
 
-            def dims_except(*dims):
-                return [d for d in test[key].dims if d not in dims]
-            
-            time = dims_except('x','y','lev')
-            space = dims_except('time','lev')
-            both = dims_except('lev')
+                def dims_except(*dims):
+                    return [d for d in test[key].dims if d not in dims]
+                
+                time = dims_except('x','y','lev')
+                space = dims_except('time','lev')
+                both = dims_except('lev')
 
-            test[f"{key}_spatial_mse"] = error.mean(dim=time)
-            test[f"{key}_temporal_mse"] = error.mean(dim=space)
-            test[f"{key}_mse"] = error.mean(dim=both)
+                test[f"{key}_spatial_mse"] = error.mean(dim=time)
+                test[f"{key}_temporal_mse"] = error.mean(dim=space)
+                test[f"{key}_mse"] = error.mean(dim=both)
 
-            test[f"{key}_spatial_skill"] = 1 - test[f"{key}_spatial_mse"] / true_var.mean(dim=time)
-            test[f"{key}_temporal_skill"] = 1 - test[f"{key}_temporal_mse"] / true_var.mean(dim=space)
-            test[f"{key}_skill"] = 1 - test[f"{key}_mse"] / true_var.mean(dim=both)
+                test[f"{key}_spatial_skill"] = 1 - test[f"{key}_spatial_mse"] / true_var.mean(dim=time)
+                test[f"{key}_temporal_skill"] = 1 - test[f"{key}_temporal_mse"] / true_var.mean(dim=space)
+                test[f"{key}_skill"] = 1 - test[f"{key}_mse"] / true_var.mean(dim=both)
 
-            test[f"{key}_spatial_correlation"] = xr.corr(truth, preds, dim=time)
-            test[f"{key}_temporal_correlation"] = xr.corr(truth, preds, dim=space)
-            test[f"{key}_correlation"] = xr.corr(truth, preds, dim=both)
+                test[f"{key}_spatial_correlation"] = xr.corr(truth, preds, dim=time)
+                test[f"{key}_temporal_correlation"] = xr.corr(truth, preds, dim=space)
+                test[f"{key}_correlation"] = xr.corr(truth, preds, dim=both)
 
         for metric in ['correlation', 'mse', 'skill']:
             test[metric] = sum(
@@ -278,6 +284,26 @@ class CNNParameterization(Parameterization):
                 preds[target][tuple(out_indices)] = pred[tuple(in_indices)]
 
         return preds
+    
+    def predict_var(self, m): 
+
+        results = {}
+        
+        preds0 = self.models[0].predict(m, additional_channel = True)
+        preds1 = self.models[1].predict(m, additional_channel = True)
+
+        preds = np.zeros_like(m.q)
+        preds[:,:,0:1,:,:] = preds0[:,:,0:1,:,:] # 1st channel to 1st layer
+        preds[:,:,1:2,:,:] = preds1[:,:,0:1,:,:] # 1st channel to 2nd layer
+        preds_var = np.zeros_like(m.q)
+        preds_var[:,:,0:1,:,:] = preds0[:,:,1:2,:,:] # 2nd channel to 1st layer
+        preds_var[:,:,1:2,:,:] = preds1[:,:,1:2,:,:] # 2nd channel to 2nd layer
+        
+        
+        results['q_forcing_advection'] = preds
+        results['q_forcing_advection_var'] = preds_var
+
+        return results
 
     @classmethod
     def train_on(cls, dataset, directory,
@@ -290,6 +316,8 @@ class CNNParameterization(Parameterization):
             model_class=FullyCNN,
             channel_type = None,
             dataset_test = None, **kw):
+
+        print('channel_type:', channel_type)
 
         layers = range(len(dataset.lev))
 
@@ -335,7 +363,7 @@ class CNNParameterization(Parameterization):
         for z, model in enumerate(models):
             model_dir = os.path.join(directory, f"models/{z}")
             if os.path.exists(model_dir):
-                models2.append(model_class.load(model_dir))
+                models2.append(model_class.load(model_dir, channel_type = channel_type))
             else:
                 X = model.extract_inputs(dataset)
                 Y = model.extract_targets(dataset)
@@ -344,6 +372,7 @@ class CNNParameterization(Parameterization):
                 model.fit(X, Y, inputs_test = X_test, targets_test = Y_test, num_epochs=num_epochs, **kw)
                 model.save(os.path.join(directory, f"models/{z}"))
                 models2.append(model)
-
+        print('model 0:', models2[0].channel_type)
+        print('model 1:', models2[1].channel_type)
         # Return the trained parameterization
         return cls(directory, models=models2)
