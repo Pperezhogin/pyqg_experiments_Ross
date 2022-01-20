@@ -18,6 +18,43 @@ from matplotlib.lines import Line2D
 
 import pyqg_subgrid_experiments as pse
 
+def PDF_histogram(x, xmin = None, xmax = None, Nbins = None, bandwidth = None):
+    """
+    x is 1D numpy array with data
+
+    How to use:
+        first apply without arguments
+        Then adjust xmin, xmax, Nbins or bandwidth
+    """    
+    N = x.shape[0]
+
+    if xmin is None:
+        xmin = x.min()
+    if xmax is None:
+        xmax = x.max()
+
+    if Nbins is None:
+        Nbins = 20
+
+    if bandwidth is not None:
+        Nbins = int(np.floor(xmax - xmin) / bandwidth)
+
+    bandwidth = (xmax - xmin) / Nbins
+    
+    hist, bin_edges = np.histogram(x, range=(xmin,xmax), bins = Nbins)
+
+    # hist / N is probability to go into bin
+    # probability / bandwidth = probability density
+    density = hist / N / bandwidth
+
+    # we assign one values to each bin
+    points = (bin_edges[0:-1] + bin_edges[1:]) * 0.5
+
+    print(f"Number of bins = {Nbins}, over the interval ({xmin},{xmax}), with bandwidth = {bandwidth}")
+    print(f"This interval covers {sum(hist)/N} of total probability")
+    
+    return density, points
+
 def calc_ispec(model, ph, lo_mult=1.5):
     """Compute isotropic spectrum `phr` of `ph` from 2D spectrum.
     Parameters

@@ -297,6 +297,41 @@ class Dataset(object):
     #
     ###########################################
 
+    def isotropic_spectrum_compute(self, x_array, z=0):
+        """
+        x_array - any xarray with dimensions run x time x lev x Y x X
+        z - specify level, or pass 'sum'
+        Method:
+            1) For each run and time compute fft, square coefficients and
+            normalize it like in pyqg
+
+            2) compute isotropic spectrum for each snapshot
+
+            3) average
+
+        """
+        af2 = np.zeros_like(self.m.qh, dtype='float32')
+
+        Nruns, Ntimes = x_array.shape[0:2]
+        for r in range(Nruns):
+            for t in range(Ntimes):
+                a   = np.array(x_array.isel(run = r, time = t)).astype('float64')
+                af  = self.m.fft(a)
+                
+                # lev x Y x X array
+                af2 += (np.abs(af) ** 2 / self.m.M**2).astype('float32')
+
+        af2 = af2 / (Nruns * Ntimes)
+
+        if isinstance(z,int):
+            af2 = af2[z,:,:]
+        if z == 'sum':
+            af2 = af2.sum(axis=0)
+        
+        k, spectrum = calc_ispec(self.m, af2)
+
+        return k, spectrum
+
     def isotropic_spectrum(self, key, z=None, agg=np.mean, time_avg=True):
         """Compute the spectrum of a given diagnostic quantity in terms of the
         radial wavenumber (possibly averaged across snapshots at different
