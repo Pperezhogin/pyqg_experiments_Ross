@@ -5,9 +5,10 @@ import xarray as xr
 import inspect
 import operator
 import re
-from pyqg.diagnostic_tools import calc_ispec
+from pyqg.diagnostic_tools import calc_ispec, calc_ispec_perezhogin
 from collections import OrderedDict, defaultdict
 from scipy.stats import linregress, wasserstein_distance
+from sklearn.decomposition import PCA
 
 class cachedproperty(object):
   def __init__(self, function):
@@ -296,6 +297,61 @@ class Dataset(object):
     # Helpers for extracting diagnostics
     #
     ###########################################
+
+    def pca(self, x_array, z=0, nsamples = 10, ncomponents = 1, svd_solver='auto'):
+        """
+        x_array - any xarray with dimensions run x time x lev x Y x X
+        z - specify level
+        Method:
+            1) Form array of nsamples x nfeatures, 
+            where nsamples is formed from run*time dimensions,
+            and nfeatures from Y*X dimensions
+            2) apply pca
+            3) Back transformation to nsamples x Y x X
+        """
+        Nruns, Ntimes, Nlev, Ny, Nx = x_array.shape
+
+        if nsamples > Nruns * Ntimes:
+            nsamples = Nruns * Ntimes
+            print('nsamples is reduced to', nsamples)
+
+        x = np.reshape(x_array.data[:,:,z,:,:], [Nruns*Ntimes, Ny*Nx]);
+        idx = np.random.permutation(Nruns*Ntimes)[:nsamples]
+        x = x[idx,:].astype('float64')
+
+        print('Matrix for PCA: ', x.shape)
+
+        if svd_solver == 'my':
+            u, s, vh = np.linalg.svd(x, full_matrices = True)
+            var_ratio = s / s.sum()
+            nvars = var_ratio.size
+            components = vh[0:nvars,:].reshape([nvars, Ny, Nx])
+        else:        
+            pca = PCA(n_components = ncomponents, svd_solver=svd_solver)
+            pca.fit(x)
+
+            var_ratio = pca.explained_variance_ratio_
+            components = pca.components_.reshape([ncomponents, Ny, Nx])
+
+        print('Var ratio = ', var_ratio[0:10])
+        print('Sum var ratio = ', var_ratio.sum())
+        print('Components shape = ', components.shape)
+
+        return var_ratio, components
+
+    def isotropic_spectrum_2darray(self, py_2darray):
+        x = np.zeros((self.m.nz,self.m.ny,self.m.nx))
+        x[0,:,:] = py_2darray.astype('float64')
+        
+        af  = self.m.fft(x)
+                
+        # lev x Y x X array
+        af2 = (np.abs(af) ** 2 / self.m.M**2).astype('float32')
+        af2 = af2[0,:,:]
+
+        k, spectrum = calc_ispec_perezhogin(self.m, af2)
+
+        return k, spectrum
 
     def isotropic_spectrum_compute(self, x_array, z=0):
         """
